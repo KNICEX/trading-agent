@@ -1,0 +1,8 @@
+cex:
+  binance:
+    api_key: ""
+    api_secret: ""
+
+llm:
+  gemini:
+    api_key: ""
