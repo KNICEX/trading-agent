@@ -1,24 +1,50 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"github.com/KNICEX/trading-agent/internal/repo"
+	"github.com/KNICEX/trading-agent/internal/service/exchange/binance"
+	"github.com/KNICEX/trading-agent/internal/service/llm/gemini"
+	"github.com/KNICEX/trading-agent/internal/service/monitor"
+	"github.com/KNICEX/trading-agent/ioc"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"time"
 )
 
-func main() {
-	initDev()
-}
+func initViper() {
 
-func initDev() {
-	initViper("config.dev")
-}
+	// --config=./config/xxx.yaml
+	file := pflag.String("config", "./config/config.dev.yaml", "specify config file")
 
-func initViper(name string) {
-	viper.SetConfigName(name)
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath("./config")
+	viper.SetConfigFile(*file)
 	err := viper.ReadInConfig()
 	if err != nil {
 		panic(fmt.Errorf("fatal error config file: %s \n", err))
+	}
+
+}
+
+func main() {
+	initViper()
+
+	db := ioc.InitDB()
+	geminiCli := ioc.InitGeminiCli()
+	llmSvc := gemini.NewService(geminiCli)
+	bian := ioc.InitBinanceCli()
+
+	symbolSvc := binance.NewSymbolService(bian)
+	marketSvc := binance.NewMarketService(bian)
+
+	abnormalRepo := repo.NewAbnormalRepo(db)
+	abnormalAnalyzer := monitor.NewLLMAnalyzer(llmSvc)
+
+	abnormalMonitor := monitor.NewAbnormalMonitor(abnormalAnalyzer, abnormalRepo, symbolSvc, marketSvc)
+	task := monitor.NewAbnormalMonitorTask(abnormalMonitor, symbolSvc)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
+	defer cancel()
+	if err := task.Run(ctx); err != nil {
+		panic(err)
 	}
 }

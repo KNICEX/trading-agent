@@ -2,7 +2,7 @@ package strategy
 
 import (
 	"context"
-	"github.com/KNICEX/trading-agent/service/exchange"
+	"github.com/KNICEX/trading-agent/internal/service/exchange"
 )
 
 type OrderSide string
