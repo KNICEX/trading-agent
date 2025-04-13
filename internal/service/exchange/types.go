@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"github.com/shopspring/decimal"
 	"time"
 )
 
@@ -10,7 +11,7 @@ import (
 type Symbol struct {
 	Base  string
 	Quote string
-	Price string
+	Price decimal.Decimal
 }
 
 func (s *Symbol) ToString() string {
@@ -66,13 +67,13 @@ type OrderService interface {
 type Kline struct {
 	OpenTime         time.Time
 	CloseTime        time.Time
-	Open             string
-	Close            string
-	High             string
-	Low              string
-	Volume           string // 成交量
-	QuoteAssetVolume string // 成交额
-	TradeNum         int64  // 成交笔数
+	Open             decimal.Decimal
+	Close            decimal.Decimal
+	High             decimal.Decimal
+	Low              decimal.Decimal
+	Volume           decimal.Decimal // 成交量
+	QuoteAssetVolume decimal.Decimal // 成交额
+	TradeNum         int64           // 成交笔数
 }
 
 type MarketService interface {

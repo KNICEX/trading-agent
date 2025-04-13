@@ -1,6 +1,8 @@
 package entity
 
-import "time"
+import (
+	"time"
+)
 
 // Abnormal 交易对异动
 type Abnormal struct {
@@ -13,6 +15,7 @@ type Abnormal struct {
 	Reason       string
 	Status       int       `gorm:"index"` // 预测情况， 0:运行中， 1:成功，2:失败， 以30min后的运行情况为标准
 	CreatedAt    time.Time `gorm:"index"`
+	UpdatedAt    time.Time `gorm:"index"`
 }
 
 const (

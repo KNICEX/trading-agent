@@ -2,19 +2,17 @@ package monitor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/KNICEX/trading-agent/internal/entity"
 	"github.com/KNICEX/trading-agent/internal/repo"
 	"github.com/KNICEX/trading-agent/internal/service/exchange"
-	"github.com/KNICEX/trading-agent/internal/service/llm"
+	"github.com/KNICEX/trading-agent/internal/service/strategy"
 	"log/slog"
-	"strings"
 	"time"
 )
 
 type AbnormalMonitor struct {
-	analyzer AbnormalAnalyzer
+	analyzer strategy.AbnormalAnalyzer
 	notifier Notifier
 
 	repo repo.AbnormalRepo
@@ -26,8 +24,8 @@ type AbnormalMonitor struct {
 type consoleNotifier struct {
 }
 
-func (c consoleNotifier) Notify(ctx context.Context, signal AbnormalSignal) error {
-	fmt.Println("find abnormal signal", signal)
+func (c consoleNotifier) Notify(ctx context.Context, signal strategy.AbnormalSignal) error {
+	fmt.Printf("find abnormal signal: %+v", signal)
 	return nil
 }
 
@@ -39,7 +37,7 @@ func WithNotifier(notifier Notifier) Option {
 	}
 }
 
-func NewAbnormalMonitor(analyzer AbnormalAnalyzer, repo repo.AbnormalRepo, symbolSvc exchange.SymbolService, marketSvc exchange.MarketService, opts ...Option) AbnormalService {
+func NewAbnormalMonitor(analyzer strategy.AbnormalAnalyzer, repo repo.AbnormalRepo, symbolSvc exchange.SymbolService, marketSvc exchange.MarketService, opts ...Option) AbnormalService {
 	monitor := &AbnormalMonitor{
 		analyzer:  analyzer,
 		repo:      repo,
@@ -59,7 +57,7 @@ func (m *AbnormalMonitor) Scan(ctx context.Context, symbols []exchange.Symbol) e
 			ctx,
 			symbol,
 			exchange.Interval15m,
-			time.Now().Add(-8*time.Hour),
+			time.Now().Add(-10*time.Hour),
 			time.Now(),
 		)
 		if err != nil {
@@ -72,7 +70,9 @@ func (m *AbnormalMonitor) Scan(ctx context.Context, symbols []exchange.Symbol) e
 		}
 
 		slog.Info("analyzing symbol abnormal", "symbol", symbol)
-		signal, err := m.analyzer.Analyze(ctx, kLines)
+		signal, err := m.analyzer.Analyze(ctx, strategy.AnalyzeInput{
+			Klines15Min: kLines,
+		})
 		if err != nil {
 			slog.Error("failed to analyze symbol", "symbol", symbol, "error", err)
 		}
@@ -82,6 +82,8 @@ func (m *AbnormalMonitor) Scan(ctx context.Context, symbols []exchange.Symbol) e
 		if err != nil {
 			slog.Error("failed to get symbol latest price", "symbol", symbol, "error", err)
 		}
+		signal.Symbol = symbol
+		signal.CurrentPrice = symbol.Price
 
 		if !signal.Abnormal {
 			continue
@@ -91,7 +93,7 @@ func (m *AbnormalMonitor) Scan(ctx context.Context, symbols []exchange.Symbol) e
 		_, err = m.repo.Create(ctx, entity.Abnormal{
 			BaseSymbol:   symbol.Base,
 			QuoteSymbol:  symbol.Quote,
-			Price:        symbol.Price,
+			Price:        symbol.Price.String(),
 			AbnormalType: string(signal.Type),
 			Confidence:   signal.Confidence,
 			Reason:       signal.Reason,
@@ -110,46 +112,4 @@ func (m *AbnormalMonitor) Scan(ctx context.Context, symbols []exchange.Symbol) e
 		}()
 	}
 	return nil
-}
-
-type llmAnalyzer struct {
-	llmSvc llm.Service
-}
-
-func NewLLMAnalyzer(llmSvc llm.Service) AbnormalAnalyzer {
-	return &llmAnalyzer{
-		llmSvc: llmSvc,
-	}
-}
-
-func (a *llmAnalyzer) Analyze(ctx context.Context, kLines []exchange.Kline) (AbnormalSignal, error) {
-	prompt := fmt.Sprintf("这是某交易对最近的5mK线数据: \n"+
-		"%+v\n 请判断是否存在异动情况, 异动的大概标准是："+
-		"(连续小阳线且量价跟随, 展示出和之前截然不同的走势) 看涨(bullish), (或者是突然大阴线, 或者逐渐放量下跌)看跌(bearish), 你需要判断是否异动(abnormal), "+
-		"异动的判断应该更加严谨, 无需震荡请不要认为异动\n"+
-		"后续看涨还是看跌(type), 以及你认为异动的原因(reason), "+
-		"并且给出一个0-1的置信度(confidence), 请按如下json格式回复我: "+
-		`{"abnormal": true | false, "type": "bullish or bearish", "reason": "判断异动的原因", "confidence": 0-1}`, kLines)
-
-	answer, err := a.llmSvc.AskOnce(ctx, llm.Question{Content: prompt})
-	if err != nil {
-		return AbnormalSignal{}, err
-	}
-
-	var signal AbnormalSignal
-	if err = a.extractAnswer(answer, &signal); err != nil {
-		return AbnormalSignal{}, err
-	}
-	return signal, nil
-}
-
-func (a *llmAnalyzer) extractAnswer(answer llm.Answer, v any) error {
-	// 解析JSON
-	answer.Content = strings.Trim(answer.Content, "\n")
-	lines := strings.Split(answer.Content, "\n")
-	if len(lines) < 3 {
-		return fmt.Errorf("invalid answer format")
-	}
-	content := strings.Join(lines[1:len(lines)-1], "\n")
-	return json.Unmarshal([]byte(content), v)
 }

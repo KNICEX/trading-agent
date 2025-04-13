@@ -27,16 +27,17 @@ type Suggestion struct {
 	Reason string // reason for the recommendation
 }
 
-type MultiKline struct {
-	Week     []exchange.Kline
-	Day      []exchange.Kline
-	Hour4    []exchange.Kline
-	Hour     []exchange.Kline
-	Minute15 []exchange.Kline
-	Minute30 []exchange.Kline
-	Minute5  []exchange.Kline
+type AnalyzeInput struct {
+	Symbol      exchange.Symbol
+	KlinesWeek  []exchange.Kline
+	KlinesDay   []exchange.Kline
+	Klines4Hour []exchange.Kline
+	KlinesHour  []exchange.Kline
+	Klines15Min []exchange.Kline
 }
 
 type Service interface {
-	Analyze(ctx context.Context, kLines MultiKline) (Suggestion, error)
+	Analyze(ctx context.Context, input AnalyzeInput) (Suggestion, error)
 }
+
+type Tendency int

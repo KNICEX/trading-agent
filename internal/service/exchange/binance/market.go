@@ -3,6 +3,7 @@ package binance
 import (
 	"context"
 	"github.com/KNICEX/trading-agent/internal/service/exchange"
+	"github.com/KNICEX/trading-agent/pkg/decimalx"
 	"github.com/adshao/go-binance/v2"
 	"github.com/samber/lo"
 	"time"
@@ -26,12 +27,12 @@ func (svc *MarketService) GetKlines(ctx context.Context, symbol exchange.Symbol,
 		return exchange.Kline{
 			OpenTime:         time.UnixMilli(item.OpenTime),
 			CloseTime:        time.UnixMilli(item.CloseTime),
-			Open:             item.Open,
-			Close:            item.Close,
-			High:             item.High,
-			Low:              item.Low,
-			Volume:           item.Volume,
-			QuoteAssetVolume: item.QuoteAssetVolume,
+			Open:             decimalx.MustFromString(item.Open),
+			Close:            decimalx.MustFromString(item.Close),
+			High:             decimalx.MustFromString(item.High),
+			Low:              decimalx.MustFromString(item.Low),
+			Volume:           decimalx.MustFromString(item.Volume),
+			QuoteAssetVolume: decimalx.MustFromString(item.QuoteAssetVolume),
 			TradeNum:         item.TradeNum,
 		}
 	}), nil

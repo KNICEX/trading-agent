@@ -22,6 +22,6 @@ func TestMarketService_GetKlines(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, line := range klines {
-		t.Log(line)
+		t.Logf("%+v\n", line)
 	}
 }

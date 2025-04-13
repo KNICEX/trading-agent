@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"github.com/KNICEX/trading-agent/internal/repo"
 	"github.com/KNICEX/trading-agent/internal/service/exchange/binance"
-	"github.com/KNICEX/trading-agent/internal/service/llm/gemini"
 	"github.com/KNICEX/trading-agent/internal/service/monitor"
+	"github.com/KNICEX/trading-agent/internal/service/strategy"
 	"github.com/KNICEX/trading-agent/ioc"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -30,15 +30,18 @@ func main() {
 	initViper()
 
 	db := ioc.InitDB()
-	geminiCli := ioc.InitGeminiCli()
-	llmSvc := gemini.NewService(geminiCli)
+	//geminiCli := ioc.InitGeminiCli()
+	//llmSvc := gemini.NewService(geminiCli)
 	bian := ioc.InitBinanceCli()
 
 	symbolSvc := binance.NewSymbolService(bian)
 	marketSvc := binance.NewMarketService(bian)
 
+	if err := repo.InitTables(db); err != nil {
+		panic(err)
+	}
 	abnormalRepo := repo.NewAbnormalRepo(db)
-	abnormalAnalyzer := monitor.NewLLMAnalyzer(llmSvc)
+	abnormalAnalyzer := strategy.NewRuleBasedAnalyzer()
 
 	abnormalMonitor := monitor.NewAbnormalMonitor(abnormalAnalyzer, abnormalRepo, symbolSvc, marketSvc)
 	task := monitor.NewAbnormalMonitorTask(abnormalMonitor, symbolSvc)

@@ -3,25 +3,8 @@ package monitor
 import (
 	"context"
 	"github.com/KNICEX/trading-agent/internal/service/exchange"
-	"time"
+	"github.com/KNICEX/trading-agent/internal/service/strategy"
 )
-
-type AbnormalType string
-
-const (
-	Bullish AbnormalType = "bullish"
-	Bearish AbnormalType = "bearish"
-)
-
-type AbnormalSignal struct {
-	Abnormal     bool            `json:"abnormal"`
-	Symbol       exchange.Symbol `json:"symbol"`
-	Reason       string          `json:"reason"`
-	Type         AbnormalType    `json:"type"`
-	Confidence   float64         `json:"confidence"`
-	CurrentPrice string          `json:"current_price"`
-	Timestamp    time.Time       `json:"timestamp"`
-}
 
 // AbnormalService 监控服务接口
 type AbnormalService interface {
@@ -29,9 +12,5 @@ type AbnormalService interface {
 }
 
 type Notifier interface {
-	Notify(ctx context.Context, signal AbnormalSignal) error
-}
-
-type AbnormalAnalyzer interface {
-	Analyze(ctx context.Context, kLines []exchange.Kline) (AbnormalSignal, error)
+	Notify(ctx context.Context, signal strategy.AbnormalSignal) error
 }

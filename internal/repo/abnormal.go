@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/KNICEX/trading-agent/internal/entity"
 	"gorm.io/gorm"
+	"time"
 )
 
 type AbnormalRepo interface {
@@ -31,7 +32,10 @@ func (r *abnormalRepo) Create(ctx context.Context, abnormal entity.Abnormal) (in
 }
 
 func (r *abnormalRepo) UpdateStatus(ctx context.Context, id int64, status int) error {
-	err := r.db.WithContext(ctx).Model(&entity.Abnormal{}).Where("id = ?", id).Update("status", status).Error
+	err := r.db.WithContext(ctx).Model(&entity.Abnormal{}).Where("id = ?", id).Updates(map[string]any{
+		"status":     status,
+		"updated_at": time.Now(),
+	}).Error
 	if err != nil {
 		return err
 	}
