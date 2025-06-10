@@ -45,6 +45,20 @@ const (
 	Interval1M  Interval = "1M"
 )
 
+type Side string
+
+const (
+	Buy  Side = "buy"
+	Sell Side = "sell"
+)
+
+type PositionSide string
+
+const (
+	Long  PositionSide = "long"
+	Short PositionSide = "short"
+)
+
 type Service interface {
 }
 
@@ -52,15 +66,15 @@ type OrderService interface {
 	CreateLimitBuy(ctx context.Context, symbol Symbol, amount, price float64) (string, error)
 	CreateLimitSell(ctx context.Context, symbol Symbol, amount, price string)
 
-	CreateMarketBuy()
-	CreateMarketSell()
+	CreateMarketBuy(ctx context.Context)
+	CreateMarketSell(ctx context.Context)
 
-	CancelOrder()
-	CancelAllOrders()
-	GetOrder()
-	GetOpenOrders()
-	GetAllOrders()
-	GetOrderBook()
+	CancelOrder(ctx context.Context)
+	CancelAllOrders(ctx context.Context)
+	GetOrder(ctx context.Context)
+	GetOpenOrders(ctx context.Context)
+	GetAllOrders(ctx context.Context)
+	GetOrderBook(ctx context.Context)
 }
 
 type Kline struct {
@@ -82,4 +96,27 @@ type MarketService interface {
 type SymbolService interface {
 	GetAllSymbols(ctx context.Context) ([]Symbol, error)
 	GetSymbolPrice(ctx context.Context, symbol Symbol) (Symbol, error)
+}
+
+type Position struct {
+	Symbol    Symbol
+	Amount    string    // 持仓量
+	Price     string    // 持仓均价
+	Side      Side      // 持仓方向 buy/sell
+	OpenTime  time.Time // 持仓开仓时间
+	CloseTime time.Time // 持仓平仓时间
+	Profit    string    // 持仓盈亏, quote asset
+}
+
+type OrderStatus string
+
+type Order struct {
+	Id           string
+	Side         Side         // 挂单方向 buy/sell
+	PositionSide PositionSide // 持仓方向 long/short
+	Symbol       Symbol
+	Price        string      // 挂单价格
+	Amount       string      // 挂单数量
+	Status       OrderStatus // 挂单状态
+	StopPrice    string      // 止损价格
 }

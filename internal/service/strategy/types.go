@@ -1,10 +1,5 @@
 package strategy
 
-import (
-	"context"
-	"github.com/KNICEX/trading-agent/internal/service/exchange"
-)
-
 type OrderSide string
 
 type Priority int
@@ -25,18 +20,4 @@ type Suggestion struct {
 	Priority  Priority  // recommendation priority
 
 	Reason string // reason for the recommendation
-}
-
-type MultiKline struct {
-	Week     []exchange.Kline
-	Day      []exchange.Kline
-	Hour4    []exchange.Kline
-	Hour     []exchange.Kline
-	Minute15 []exchange.Kline
-	Minute30 []exchange.Kline
-	Minute5  []exchange.Kline
-}
-
-type Service interface {
-	Analyze(ctx context.Context, kLines MultiKline) (Suggestion, error)
 }
