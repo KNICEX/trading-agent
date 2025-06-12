@@ -11,8 +11,7 @@ import (
 )
 
 type OrderService struct {
-	cli *binance.Client
-
+	cli          *binance.Client
 	orderSlTpMap *orderSlTpMap
 }
 
