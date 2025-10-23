@@ -3,15 +3,15 @@ package exchange
 import (
 	"context"
 	"fmt"
-	"github.com/shopspring/decimal"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 // Symbol 交易对
 type Symbol struct {
 	Base  string
 	Quote string
-	Price decimal.Decimal
 }
 
 func (s *Symbol) ToString() string {
@@ -46,24 +46,6 @@ const (
 	Interval1M  Interval = "1M"
 )
 
-type Service interface {
-}
-
-type OrderService interface {
-	CreateLimitBuy(ctx context.Context, symbol Symbol, amount, price float64) (string, error)
-	CreateLimitSell(ctx context.Context, symbol Symbol, amount, price string)
-
-	CreateMarketBuy()
-	CreateMarketSell()
-
-	CancelOrder()
-	CancelAllOrders()
-	GetOrder()
-	GetOpenOrders()
-	GetAllOrders()
-	GetOrderBook()
-}
-
 type Kline struct {
 	OpenTime         time.Time
 	CloseTime        time.Time
@@ -79,7 +61,6 @@ type Kline struct {
 type MarketService interface {
 	GetKlines(ctx context.Context, symbol Symbol, interval Interval, startTime, endTime time.Time) ([]Kline, error)
 }
-
 type SymbolService interface {
 	GetAllSymbols(ctx context.Context) ([]Symbol, error)
 	GetSymbolPrice(ctx context.Context, symbol Symbol) (Symbol, error)

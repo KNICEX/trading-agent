@@ -2,10 +2,11 @@ package binance
 
 import (
 	"context"
-	"github.com/adshao/go-binance/v2"
-	"github.com/spf13/viper"
 	"testing"
 	"time"
+
+	"github.com/adshao/go-binance/v2"
+	"github.com/spf13/viper"
 )
 
 func initClient() *binance.Client {
