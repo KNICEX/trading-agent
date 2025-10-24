@@ -3,12 +3,15 @@ package binance
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
+
 	"github.com/KNICEX/trading-agent/internal/service/exchange"
 	"github.com/adshao/go-binance/v2/futures"
 	"github.com/shopspring/decimal"
-	"strconv"
-	"time"
 )
+
+var _ exchange.OrderService = (*OrderService)(nil)
 
 type OrderService struct {
 	cli                   *futures.Client
@@ -248,4 +251,8 @@ func (o *OrderService) CancelMultipleOrders(ctx context.Context, req exchange.Ca
 		OrderIDList(orderIds).
 		Do(ctx)
 	return err
+}
+
+func (o *OrderService) GetAllOrders(ctx context.Context) ([]exchange.OrderInfo, error) {
+	return o.ListOpenOrders(ctx, exchange.ListOpenOrdersReq{})
 }
