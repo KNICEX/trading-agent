@@ -47,7 +47,7 @@ type OrderService interface {
 	ListOrders(ctx context.Context, req ListOrdersReq) ([]OrderInfo, error)
 	ListOpenOrders(ctx context.Context, req ListOpenOrdersReq) ([]OrderInfo, error)
 
-	GetAllOrders(ctx context.Context)
+	GetAllOrders(ctx context.Context) ([]OrderInfo, error)
 
 	// cancel order
 	CancelOrder(ctx context.Context, req CancelOrderReq) error                   // cancel the order with a specified id for a certain trading pair

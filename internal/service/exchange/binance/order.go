@@ -3,12 +3,15 @@ package binance
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
+
 	"github.com/KNICEX/trading-agent/internal/service/exchange"
 	"github.com/adshao/go-binance/v2/futures"
 	"github.com/shopspring/decimal"
-	"strconv"
-	"time"
 )
+
+var _ exchange.OrderService = (*OrderService)(nil)
 
 type OrderService struct {
 	cli                   *futures.Client
@@ -20,7 +23,7 @@ func (o *OrderService) CreateOrder(ctx context.Context, req exchange.CreateOrder
 		Symbol(req.Symbol.ToString()).
 		Side(futures.SideType(req.Side)).                 // BUY / SELL
 		Type(futures.OrderType(req.OrderType)).           // LIMIT / MARKET
-		Quantity(req.Amount.String()).                    // 下单数量
+		Quantity(req.Quantity.String()).                  // 下单数量
 		Price(req.Price.String()).                        // 限价单才需要
 		PositionSide(futures.PositionSideType(req.Side)). // LONG / SHORT
 		TimeInForce(futures.TimeInForceTypeGTC).          // 挂单时效
@@ -39,7 +42,7 @@ func (o *OrderService) CreateBatchOrders(ctx context.Context, req []exchange.Cre
 			Symbol(orderReq.Symbol.ToString()).
 			Side(futures.SideType(orderReq.Side)).                 // BUY / SELL
 			Type(futures.OrderType(orderReq.OrderType)).           // LIMIT / MARKET
-			Quantity(orderReq.Amount.String()).                    // 下单数量
+			Quantity(orderReq.Quantity.String()).                  // 下单数量
 			Price(orderReq.Price.String()).                        // 限价单才需要
 			PositionSide(futures.PositionSideType(orderReq.Side)). // LONG / SHORT
 			TimeInForce(futures.TimeInForceTypeGTC))
@@ -62,7 +65,7 @@ func (o *OrderService) ModifyOrder(ctx context.Context, req exchange.ModifyOrder
 	service := o.cli.NewModifyOrderService().
 		Symbol(req.Symbol.ToString()).
 		Side(futures.SideType(req.Side)).
-		Quantity(req.Amount.String())
+		Quantity(req.Quantity.String())
 
 	if !req.Price.IsZero() {
 		service = service.Price(req.Price.String())
@@ -89,7 +92,7 @@ func (o *OrderService) ModifyBatchOrders(ctx context.Context, req []exchange.Mod
 		modifyOrder.
 			Symbol(orderReq.Symbol.ToString()).
 			Side(futures.SideType(orderReq.Side)).
-			Quantity(orderReq.Amount.String())
+			Quantity(orderReq.Quantity.String())
 
 		if !orderReq.Price.IsZero() {
 			modifyOrder.Price(orderReq.Price.String())
@@ -120,14 +123,14 @@ func (o *OrderService) GetOrder(ctx context.Context, req exchange.GetOrderReq) (
 	amount, _ := decimal.NewFromString(order.OrigQuantity)
 
 	return &exchange.OrderInfo{
-		Id:        strconv.FormatInt(order.OrderID, 10),
-		Symbol:    req.Symbol,
-		Side:      exchange.OrderSide(order.Side),
-		Price:     price,
-		Amount:    amount,
-		Status:    exchange.OrderStatus(order.Status),
-		CreatedAt: time.UnixMilli(order.Time),
-		UpdatedAt: time.UnixMilli(order.UpdateTime),
+		Id:          strconv.FormatInt(order.OrderID, 10),
+		TradingPair: req.Symbol,
+		Side:        exchange.OrderSide(order.Side),
+		Price:       price,
+		Quantity:    amount,
+		Status:      exchange.OrderStatus(order.Status),
+		CreatedAt:   time.UnixMilli(order.Time),
+		UpdatedAt:   time.UnixMilli(order.UpdateTime),
 	}, nil
 }
 
@@ -144,14 +147,14 @@ func (o *OrderService) GetOpenOrder(ctx context.Context, req exchange.GetOpenOrd
 	amount, _ := decimal.NewFromString(order.OrigQuantity)
 
 	return &exchange.OrderInfo{
-		Id:        strconv.FormatInt(order.OrderID, 10),
-		Symbol:    req.Symbol,
-		Side:      exchange.OrderSide(order.Side),
-		Price:     price,
-		Amount:    amount,
-		Status:    exchange.OrderStatus(order.Status),
-		CreatedAt: time.UnixMilli(order.Time),
-		UpdatedAt: time.UnixMilli(order.UpdateTime),
+		Id:          strconv.FormatInt(order.OrderID, 10),
+		TradingPair: req.Symbol,
+		Side:        exchange.OrderSide(order.Side),
+		Price:       price,
+		Quantity:    amount,
+		Status:      exchange.OrderStatus(order.Status),
+		CreatedAt:   time.UnixMilli(order.Time),
+		UpdatedAt:   time.UnixMilli(order.UpdateTime),
 	}, nil
 }
 
@@ -179,14 +182,14 @@ func (o *OrderService) ListOrders(ctx context.Context, req exchange.ListOrdersRe
 		price, _ := decimal.NewFromString(oinfo.Price)
 		amount, _ := decimal.NewFromString(oinfo.OrigQuantity)
 		results = append(results, exchange.OrderInfo{
-			Id:        strconv.FormatInt(oinfo.OrderID, 10),
-			Symbol:    req.Symbol,
-			Side:      exchange.OrderSide(oinfo.Side),
-			Price:     price,
-			Amount:    amount,
-			Status:    exchange.OrderStatus(oinfo.Status),
-			CreatedAt: time.UnixMilli(oinfo.Time),
-			UpdatedAt: time.UnixMilli(oinfo.UpdateTime),
+			Id:          strconv.FormatInt(oinfo.OrderID, 10),
+			TradingPair: req.Symbol,
+			Side:        exchange.OrderSide(oinfo.Side),
+			Price:       price,
+			Quantity:    amount,
+			Status:      o.orderStatus(oinfo.Status),
+			CreatedAt:   time.UnixMilli(oinfo.Time),
+			UpdatedAt:   time.UnixMilli(oinfo.UpdateTime),
 		})
 	}
 	return results, nil
@@ -206,18 +209,21 @@ func (o *OrderService) ListOpenOrders(ctx context.Context, req exchange.ListOpen
 
 	results := make([]exchange.OrderInfo, 0, len(orders))
 	for _, oinfo := range orders {
+		if oinfo.Status == futures.OrderStatusTypeCanceled {
+			continue
+		}
 		price, _ := decimal.NewFromString(oinfo.Price)
 		amount, _ := decimal.NewFromString(oinfo.OrigQuantity)
 		base, quote := exchange.SplitSymbol(oinfo.Symbol)
 		results = append(results, exchange.OrderInfo{
-			Id:        strconv.FormatInt(oinfo.OrderID, 10),
-			Symbol:    exchange.Symbol{Base: base, Quote: quote},
-			Side:      exchange.OrderSide(oinfo.Side),
-			Price:     price,
-			Amount:    amount,
-			Status:    exchange.OrderStatus(oinfo.Status),
-			CreatedAt: time.UnixMilli(oinfo.Time),
-			UpdatedAt: time.UnixMilli(oinfo.UpdateTime),
+			Id:          strconv.FormatInt(oinfo.OrderID, 10),
+			TradingPair: exchange.TradingPair{Base: base, Quote: quote},
+			Side:        exchange.OrderSide(oinfo.Side),
+			Price:       price,
+			Quantity:    amount,
+			Status:      o.orderStatus(oinfo.Status),
+			CreatedAt:   time.UnixMilli(oinfo.Time),
+			UpdatedAt:   time.UnixMilli(oinfo.UpdateTime),
 		})
 	}
 	return results, nil
@@ -248,4 +254,16 @@ func (o *OrderService) CancelMultipleOrders(ctx context.Context, req exchange.Ca
 		OrderIDList(orderIds).
 		Do(ctx)
 	return err
+}
+
+func (o *OrderService) orderStatus(status futures.OrderStatusType) exchange.OrderStatus {
+	switch status {
+	case futures.OrderStatusTypeNew:
+		return exchange.OrderStatusPending
+	case futures.OrderStatusTypeFilled:
+		return exchange.OrderStatusFilled
+	case futures.OrderStatusTypePartiallyFilled:
+		return exchange.OrderStatusPartiallyFilled
+	}
+	return exchange.OrderStatus(status)
 }
