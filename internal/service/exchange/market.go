@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -14,6 +15,18 @@ type Symbol struct {
 	Quote string
 }
 
+func SplitSymbol(s string) (string, string) {
+	s = strings.ToUpper(s)
+	// 常见 Quote 列表
+	quotes := []string{"USDT", "BUSD", "USDC", "BTC", "ETH"}
+	for _, q := range quotes {
+		if strings.HasSuffix(s, q) {
+			return strings.TrimSuffix(s, q), q
+		}
+	}
+	// fallback
+	return s, ""
+}
 func (s *Symbol) ToString() string {
 	return fmt.Sprintf("%s%s", s.Base, s.Quote)
 }
