@@ -47,8 +47,6 @@ type OrderService interface {
 	ListOrders(ctx context.Context, req ListOrdersReq) ([]OrderInfo, error)
 	ListOpenOrders(ctx context.Context, req ListOpenOrdersReq) ([]OrderInfo, error)
 
-	GetAllOrders(ctx context.Context) ([]OrderInfo, error)
-
 	// cancel order
 	CancelOrder(ctx context.Context, req CancelOrderReq) error                   // cancel the order with a specified id for a certain trading pair
 	CancelAllOpenOrders(ctx context.Context, req CancelAllOpenOrdersReq) error   // cancel all unfulfilled orders
@@ -57,43 +55,43 @@ type OrderService interface {
 
 // create req
 type CreateOrderReq struct {
-	Symbol    Symbol
+	Symbol    TradingPair
 	Side      OrderSide
 	OrderType OrderType
 	Price     decimal.Decimal // 限价单时有效
-	Amount    decimal.Decimal //  多少个交易对
+	Quantity  decimal.Decimal //  多少个交易对
 	Leverage  int             // 杠杆倍数， 实际仓位= amount * 交易对price || 需要保证金= 实际仓位 /  leverage
 }
 
 // modify req
 type ModifyOrderReq struct {
 	Id       OrderId
-	Symbol   Symbol
+	Symbol   TradingPair
 	Side     OrderSide
 	Price    decimal.Decimal // 限价单时有效
-	Amount   decimal.Decimal //  多少个交易对
+	Quantity decimal.Decimal //  多少个交易对
 	Leverage int             // 杠杆倍数，
 }
 
 // get req
 type GetOrderReq struct {
 	Id     OrderId
-	Symbol Symbol
+	Symbol TradingPair
 }
 type GetOpenOrderReq struct {
 	Id     OrderId
-	Symbol Symbol
+	Symbol TradingPair
 }
 
 // list req
 type ListOrdersReq struct {
-	Symbol    Symbol
+	Symbol    TradingPair
 	Limit     int
 	StartTime time.Time
 	EndTime   time.Time
 }
 type ListOpenOrdersReq struct {
-	Symbol    Symbol
+	Symbol    TradingPair
 	Limit     int
 	StartTime time.Time
 	EndTime   time.Time
@@ -101,21 +99,29 @@ type ListOpenOrdersReq struct {
 
 // cancel req
 type CancelOrderReq struct {
-	Symbol Symbol
+	Symbol TradingPair
 	Id     OrderId
 }
 type CancelAllOpenOrdersReq struct {
-	Symbol Symbol
+	Symbol TradingPair
 }
 type CancelMultipleOrdersReq struct {
-	Symbol Symbol
+	Symbol TradingPair
 	Ids    []OrderId
 }
+
 type OrderSide string
 
 const (
-	OrderSideLong  OrderSide = "LONG"
-	OrderSideShort OrderSide = "SHORT"
+	OrderSideLong  OrderSide = "BUY"
+	OrderSideShort OrderSide = "SELL"
+)
+
+type PositionSide string
+
+const (
+	PositionSideLong  PositionSide = "LONG"
+	PositionSideShort PositionSide = "SHORT"
 )
 
 type OrderStatus string
@@ -138,12 +144,12 @@ const (
 )
 
 type OrderInfo struct {
-	Id        string
-	Symbol    Symbol
-	Side      OrderSide
-	Price     decimal.Decimal
-	Amount    decimal.Decimal
-	Status    OrderStatus
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Id          string
+	TradingPair TradingPair
+	Side        OrderSide
+	Price       decimal.Decimal
+	Quantity    decimal.Decimal
+	Status      OrderStatus
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }

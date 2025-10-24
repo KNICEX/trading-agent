@@ -9,8 +9,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// Symbol 交易对
-type Symbol struct {
+// TradingPair 交易对
+type TradingPair struct {
 	Base  string
 	Quote string
 }
@@ -27,11 +27,12 @@ func SplitSymbol(s string) (string, string) {
 	// fallback
 	return s, ""
 }
-func (s *Symbol) ToString() string {
+
+func (s *TradingPair) ToString() string {
 	return fmt.Sprintf("%s%s", s.Base, s.Quote)
 }
 
-func (s *Symbol) ToSlashString() string {
+func (s *TradingPair) ToSlashString() string {
 	return fmt.Sprintf("%s/%s", s.Base, s.Quote)
 }
 
@@ -72,9 +73,9 @@ type Kline struct {
 }
 
 type MarketService interface {
-	GetKlines(ctx context.Context, symbol Symbol, interval Interval, startTime, endTime time.Time) ([]Kline, error)
+	GetKlines(ctx context.Context, symbol TradingPair, interval Interval, startTime, endTime time.Time) ([]Kline, error)
 }
 type SymbolService interface {
-	GetAllSymbols(ctx context.Context) ([]Symbol, error)
-	GetSymbolPrice(ctx context.Context, symbol Symbol) (Symbol, error)
+	GetAllSymbols(ctx context.Context) ([]TradingPair, error)
+	GetSymbolPrice(ctx context.Context, symbol TradingPair) (TradingPair, error)
 }
