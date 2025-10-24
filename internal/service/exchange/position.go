@@ -17,7 +17,7 @@ const (
 )
 
 type Position struct {
-	Symbol           Symbol
+	Symbol           TradingPair
 	Side             OrderSide
 	EntryPrice       decimal.Decimal
 	BreakEvenPrice   decimal.Decimal
@@ -35,5 +35,5 @@ type Position struct {
 type PositionService interface {
 	GetPositions(ctx context.Context) ([]Position, error)
 	// 平仓api在订单部分
-	ClosePositon(ctx context.Context, symbol Symbol, side OrderSide) error
+	ClosePositon(ctx context.Context, symbol TradingPair, side OrderSide) error
 }
