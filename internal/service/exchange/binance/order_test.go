@@ -16,9 +16,9 @@ func newOrderService(t *testing.T) *OrderService {
 
 func TestCreateOrder(t *testing.T) {
 	order := exchange.CreateOrderReq{
-		Symbol:    exchange.Symbol{Base: "BTC", Quote: "USDT"},
+		Symbol:    exchange.TradingPair{Base: "BTC", Quote: "USDT"},
 		Side:      exchange.OrderSideLong,
-		Amount:    decimal.NewFromFloat(10),
+		Quantity:  decimal.NewFromFloat(0.001),
 		Price:     decimal.NewFromFloat(100000),
 		OrderType: exchange.OrderTypeLimit,
 	}
@@ -28,4 +28,41 @@ func TestCreateOrder(t *testing.T) {
 		t.Errorf("Error creating order: %v", err)
 	}
 	t.Logf("Order ID: %s", orderId)
+}
+
+func TestCancelOrder(t *testing.T) {
+	svc := newOrderService(t)
+	err := svc.CancelOrder(context.Background(), exchange.CancelOrderReq{
+		Symbol: exchange.TradingPair{Base: "BTC", Quote: "USDT"},
+		Id:     exchange.OrderId("800749073792"),
+	})
+	if err != nil {
+		t.Errorf("Error canceling order: %v", err)
+	}
+	t.Logf("Order canceled")
+}
+
+func TestListOrders(t *testing.T) {
+	svc := newOrderService(t)
+	orders, err := svc.ListOrders(context.Background(), exchange.ListOrdersReq{
+		Symbol: exchange.TradingPair{Base: "BTC", Quote: "USDT"},
+	})
+	if err != nil {
+		t.Errorf("Error listing orders: %v", err)
+	}
+	t.Logf("Orders: %+v", orders)
+}
+
+func TestModifyOrder(t *testing.T) {
+	svc := newOrderService(t)
+	err := svc.ModifyOrder(context.Background(), exchange.ModifyOrderReq{
+		Symbol:   exchange.TradingPair{Base: "BTC", Quote: "USDT"},
+		Id:       exchange.OrderId("800749073792"),
+		Quantity: decimal.NewFromFloat(0.002),
+		Side:     exchange.OrderSideShort,
+	})
+	if err != nil {
+		t.Errorf("Error modifying order: %v", err)
+	}
+	t.Logf("Order modified")
 }
