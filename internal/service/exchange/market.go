@@ -28,6 +28,9 @@ func SplitSymbol(s string) (string, string) {
 	return s, ""
 }
 
+func (s *TradingPair) IsZero() bool {
+	return s.Base == "" || s.Quote == ""
+}
 func (s *TradingPair) ToString() string {
 	return fmt.Sprintf("%s%s", s.Base, s.Quote)
 }

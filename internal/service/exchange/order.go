@@ -55,12 +55,13 @@ type OrderService interface {
 
 // create req
 type CreateOrderReq struct {
-	Symbol    TradingPair
-	Side      OrderSide
-	OrderType OrderType
-	Price     decimal.Decimal // 限价单时有效
-	Quantity  decimal.Decimal //  多少个交易对
-	Leverage  int             // 杠杆倍数， 实际仓位= amount * 交易对price || 需要保证金= 实际仓位 /  leverage
+	Symbol      TradingPair
+	Side        OrderSide
+	OrderType   OrderType
+	PositonSide PositionSide
+	Price       decimal.Decimal // 限价单时有效
+	Quantity    decimal.Decimal //  多少个交易对
+	Leverage    int             // 杠杆倍数， 实际仓位= amount * 交易对price || 需要保证金= 实际仓位 /  leverage
 }
 
 // modify req
@@ -79,42 +80,42 @@ type GetOrderReq struct {
 	Symbol TradingPair
 }
 type GetOpenOrderReq struct {
-	Id     OrderId
-	Symbol TradingPair
+	Id          OrderId
+	TradingPair TradingPair
 }
 
 // list req
 type ListOrdersReq struct {
-	Symbol    TradingPair
-	Limit     int
-	StartTime time.Time
-	EndTime   time.Time
+	TradingPair TradingPair
+	Limit       int
+	StartTime   time.Time
+	EndTime     time.Time
 }
 type ListOpenOrdersReq struct {
-	Symbol    TradingPair
-	Limit     int
-	StartTime time.Time
-	EndTime   time.Time
+	TradingPair TradingPair
+	Limit       int
+	StartTime   time.Time
+	EndTime     time.Time
 }
 
 // cancel req
 type CancelOrderReq struct {
-	Symbol TradingPair
-	Id     OrderId
+	TradingPair TradingPair
+	Id          OrderId
 }
 type CancelAllOpenOrdersReq struct {
-	Symbol TradingPair
+	TradingPair TradingPair
 }
 type CancelMultipleOrdersReq struct {
-	Symbol TradingPair
-	Ids    []OrderId
+	TradingPair TradingPair
+	Ids         []OrderId
 }
 
 type OrderSide string
 
 const (
-	OrderSideLong  OrderSide = "BUY"
-	OrderSideShort OrderSide = "SELL"
+	OrderSideBuy  OrderSide = "BUY"
+	OrderSideSell OrderSide = "SELL"
 )
 
 type PositionSide string
