@@ -76,7 +76,13 @@ type Kline struct {
 }
 
 type MarketService interface {
-	GetKlines(ctx context.Context, symbol TradingPair, interval Interval, startTime, endTime time.Time) ([]Kline, error)
+	GetKlines(ctx context.Context, req GetKlinesReq) ([]*Kline, error)
+}
+type GetKlinesReq struct {
+	Symbol             TradingPair
+	Interval           Interval
+	StartTime, EndTime time.Time
+	Limit              int
 }
 type SymbolService interface {
 	GetAllSymbols(ctx context.Context) ([]TradingPair, error)
