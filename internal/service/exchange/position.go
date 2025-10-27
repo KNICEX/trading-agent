@@ -17,7 +17,7 @@ const (
 )
 
 type Position struct {
-	Symbol           TradingPair
+	TradingPair      TradingPair
 	PositionSide     PositionSide
 	EntryPrice       decimal.Decimal
 	BreakEvenPrice   decimal.Decimal
@@ -29,38 +29,27 @@ type Position struct {
 	// 保证金
 	MarginAmount     decimal.Decimal
 	UnrealizedProfit decimal.Decimal
-	UpdatedAt        time.Time
 }
 
 type PositionService interface {
 	// GetPositionRisk 获取账户的持仓风险信息（仓位方向、仓位大小、未实现盈亏、标记价格、强平价等）
-	GetPositionRisk(ctx context.Context, req GetPositionRiskReq) ([]*Position, error)
+	GetActivePosition(ctx context.Context, pair TradingPair) ([]Position, error)
+
+	GetActivePositions(ctx context.Context) ([]Position, error)
+
+	GetHistoryPositions(ctx context.Context, req GetHistoryPositionsReq) ([]Position, error)
 
 	ChangeLeverage(ctx context.Context, req ChangeLeverageReq) error
 }
-type ChangeLeverageReq struct {
-	Symbol   TradingPair
-	Leverage int
-}
-type GetPositionRiskReq struct {
-	Symbol     TradingPair
-	RecvWindow int64
-}
-type GetPositionMarginHistoryReq struct {
-	Symbol TradingPair
-	Type   int // 1-加保证金 2-减保证金
 
+type ChangeLeverageReq struct {
+	TradingPair TradingPair
+	Leverage    int
 }
-type UpdatePositionMarginReq struct {
-	Symbol TradingPair
-	Amount decimal.Decimal
-}
-type ChangePositionModeReq struct {
-	Symbol TradingPair
-}
-type GetPositionModeReq struct {
-	Symbol TradingPair
-}
-type GetTopLongShortPositionRatioReq struct {
-	Symbol TradingPair
+
+type GetHistoryPositionsReq struct {
+	TradingPair TradingPair
+	Limit       int
+	StartTime   time.Time
+	EndTime     time.Time
 }

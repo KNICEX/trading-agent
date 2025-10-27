@@ -29,7 +29,6 @@ func initClient(t *testing.T) *futures.Client {
 	if err != nil {
 		panic(err)
 	}
-	t.Logf("ApiKey: %s, ApiSecret: %s", config.Exchange["binance"].ApiKey, config.Exchange["binance"].ApiSecret)
 	return futures.NewClient(config.Exchange["binance"].ApiKey, config.Exchange["binance"].ApiSecret)
 }
 

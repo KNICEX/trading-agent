@@ -13,6 +13,7 @@ type AccountBalance struct {
 	Balance          decimal.Decimal
 	UnrealizedPnl    decimal.Decimal
 	AvailableBalance decimal.Decimal
+	Margin           decimal.Decimal
 }
 
 type Cursor[T any] interface {

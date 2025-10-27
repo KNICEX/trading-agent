@@ -2,10 +2,11 @@ package binance
 
 import (
 	"context"
+	"time"
+
 	"github.com/KNICEX/trading-agent/internal/service/exchange"
 	"github.com/adshao/go-binance/v2/futures"
 	"github.com/shopspring/decimal"
-	"time"
 )
 
 type MarketService struct {
@@ -46,7 +47,6 @@ func (m *MarketService) convertKlines(klines []*futures.Kline) []*exchange.Kline
 			Close:            klineClose,
 			High:             klineHigh,
 			Low:              klineLow,
-			TradeNum:         k.TradeNum,
 			Volume:           klineVolume,
 			QuoteAssetVolume: klineQuoteAssetVolume,
 		}
@@ -54,7 +54,7 @@ func (m *MarketService) convertKlines(klines []*futures.Kline) []*exchange.Kline
 	return kls
 }
 func (m *MarketService) GetKlines(ctx context.Context, req exchange.GetKlinesReq) ([]*exchange.Kline, error) {
-	svc := m.cli.NewKlinesService().Symbol(req.Symbol.ToSlashString())
+	svc := m.cli.NewKlinesService().Symbol(req.TradingPair.ToSlashString())
 	if req.Interval != "" {
 		svc.Interval(req.Interval.ToString())
 	}

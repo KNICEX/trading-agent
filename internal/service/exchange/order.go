@@ -13,10 +13,7 @@ import (
 type OrderId string
 
 func (id OrderId) IsZero() bool {
-	if id == "" {
-		return true
-	}
-	return false
+	return id == ""
 }
 func (id OrderId) ToString() string {
 	return string(id)
@@ -37,7 +34,6 @@ type OrderService interface {
 
 	// modify
 	ModifyOrder(ctx context.Context, req ModifyOrderReq) error
-	ModifyBatchOrders(ctx context.Context, req []ModifyOrderReq) error
 
 	// get
 	GetOrder(ctx context.Context, req GetOrderReq) (*OrderInfo, error)
@@ -66,12 +62,12 @@ type CreateOrderReq struct {
 
 // modify req
 type ModifyOrderReq struct {
-	Id       OrderId
-	Symbol   TradingPair
-	Side     OrderSide
-	Price    decimal.Decimal // 限价单时有效
-	Quantity decimal.Decimal //  多少个交易对
-	Leverage int             // 杠杆倍数，
+	Id          OrderId
+	TradingPair TradingPair
+	Side        OrderSide
+	Price       decimal.Decimal // 限价单时有效
+	Quantity    decimal.Decimal //  多少个交易对
+	Leverage    int             // 杠杆倍数，
 }
 
 // get req
@@ -125,15 +121,32 @@ const (
 	PositionSideShort PositionSide = "SHORT"
 )
 
+// GetCloseOrderSide 根据持仓方向获取平仓订单方向
+func (ps PositionSide) GetCloseOrderSide() OrderSide {
+	switch ps {
+	case PositionSideLong:
+		return OrderSideSell // 多头平仓用卖单
+	case PositionSideShort:
+		return OrderSideBuy // 空头平仓用买单
+	default:
+		return OrderSideSell
+	}
+}
+
 type OrderStatus string
 
 // 创建一个订单，是不是就一个id，订单成交了是不是就变成一个仓位了，仓位应该有一个单独的id
 // 这个时候是不是可以用之前订单的id去撤销未完全成交的订单
 const (
-	OrderStatusPending         = "pending"
-	OrderStatusFilled          = "filled"
-	OrderStatusPartiallyFilled = "partially_filled"
+	OrderStatusPending         OrderStatus = "pending"
+	OrderStatusFilled          OrderStatus = "filled"
+	OrderStatusPartiallyFilled OrderStatus = "partially_filled"
 )
+
+// IsFilled 判断订单是否已完全成交
+func (s OrderStatus) IsFilled() bool {
+	return s == OrderStatusFilled
+}
 
 type OrderType string
 
@@ -145,12 +158,26 @@ const (
 )
 
 type OrderInfo struct {
-	Id          string
-	TradingPair TradingPair
-	Side        OrderSide
-	Price       decimal.Decimal
-	Quantity    decimal.Decimal
-	Status      OrderStatus
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	Id               string
+	TradingPair      TradingPair
+	Side             OrderSide
+	Price            decimal.Decimal
+	Quantity         decimal.Decimal
+	ExecutedQuantity decimal.Decimal // 已成交数量
+	Status           OrderStatus
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// IsActive 判断订单是否处于活跃状态（未完全成交）
+func (o *OrderInfo) IsActive() bool {
+	return !o.Status.IsFilled()
+}
+
+// GetFilledPercentage 获取订单成交百分比
+func (o *OrderInfo) GetFilledPercentage() decimal.Decimal {
+	if o.Quantity.IsZero() {
+		return decimal.Zero
+	}
+	return o.ExecutedQuantity.Div(o.Quantity).Mul(decimal.NewFromInt(100))
 }

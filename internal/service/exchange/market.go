@@ -46,7 +46,6 @@ func (i Interval) ToString() string {
 }
 
 const (
-	Interval1m  Interval = "1m"
 	Interval3m  Interval = "3m"
 	Interval5m  Interval = "5m"
 	Interval15m Interval = "15m"
@@ -72,14 +71,13 @@ type Kline struct {
 	Low              decimal.Decimal
 	Volume           decimal.Decimal // 成交量
 	QuoteAssetVolume decimal.Decimal // 成交额
-	TradeNum         int64           // 成交笔数
 }
 
 type MarketService interface {
 	GetKlines(ctx context.Context, req GetKlinesReq) ([]*Kline, error)
 }
 type GetKlinesReq struct {
-	Symbol             TradingPair
+	TradingPair        TradingPair
 	Interval           Interval
 	StartTime, EndTime time.Time
 	Limit              int
