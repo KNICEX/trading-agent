@@ -13,7 +13,7 @@ func newPositionService(t *testing.T) *PositonService {
 
 func TestGetPosition(t *testing.T) {
 	svc := newPositionService(t)
-	positions, err := svc.GetActivePosition(context.Background(), exchange.TradingPair{Base: "BTC", Quote: "USDT"})
+	positions, err := svc.GetActivePositions(context.Background(), []exchange.TradingPair{exchange.TradingPair{Base: "BTC", Quote: "USDT"}})
 	if err != nil {
 		t.Errorf("Error getting position: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestGetPosition(t *testing.T) {
 
 func TestGetPositions(t *testing.T) {
 	svc := newPositionService(t)
-	positions, err := svc.GetActivePositions(context.Background())
+	positions, err := svc.GetActivePositions(context.Background(), []exchange.TradingPair{exchange.TradingPair{Base: "BTC", Quote: "USDT"}})
 	if err != nil {
 		t.Errorf("Error getting positions: %v", err)
 	}

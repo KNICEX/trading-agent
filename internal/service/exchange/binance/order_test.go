@@ -68,7 +68,7 @@ func TestModifyOrder(t *testing.T) {
 func TestMarketClosePosiiton(t *testing.T) {
 	svc := newOrderService(t)
 	positionSvc := newPositionService(t)
-	position, err := positionSvc.GetActivePosition(context.Background(), exchange.TradingPair{Base: "BTC", Quote: "USDT"})
+	position, err := positionSvc.GetActivePositions(context.Background(), []exchange.TradingPair{{Base: "BTC", Quote: "USDT"}})
 	if err != nil {
 		t.Fatalf("Error getting position: %v", err)
 	}

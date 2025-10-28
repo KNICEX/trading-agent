@@ -145,6 +145,7 @@ type OrderInfo struct {
 	Status           OrderStatus
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	CompletedAt      time.Time
 }
 
 // IsActive 判断订单是否处于活跃状态（未完全成交）

@@ -483,7 +483,7 @@ func TestMarketOrder(t *testing.T) {
 	// 4. 平仓
 	time.Sleep(2 * time.Second)
 	t.Log("\n=== 步骤 4: 平仓 ===")
-	positions, err := positionSvc.GetActivePosition(context.Background(), pair)
+	positions, err := positionSvc.GetActivePositions(context.Background(), []exchange.TradingPair{pair})
 	if err != nil {
 		t.Fatalf("获取持仓失败: %v", err)
 	}

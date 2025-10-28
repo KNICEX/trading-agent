@@ -29,29 +29,66 @@ type Position struct {
 	// 保证金
 	MarginAmount     decimal.Decimal
 	UnrealizedProfit decimal.Decimal
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type PositionHistory struct {
+	TradingPair  TradingPair
+	PositionSide PositionSide
+	EntryPrice   decimal.Decimal
+	ClosePrice   decimal.Decimal
+	MaxQuantity  decimal.Decimal
+	OpenedAt     time.Time
+	ClosedAt     time.Time
+
+	Events []PositionEvent
+}
+
+type PositionEventType string
+
+const (
+	// 创建仓位
+	PositionEventTypeCreate PositionEventType = "CREATE"
+	// 增加仓位
+	PositionEventTypeIncrease PositionEventType = "INCREASE"
+	// 减少仓位
+	PositionEventTypeDecrease PositionEventType = "DECREASE"
+	// 完全平仓
+	PositionEventTypeClose PositionEventType = "CLOSE"
+)
+
+type PositionEvent struct {
+	OrderId        OrderId
+	EventType      PositionEventType
+	Quantity       decimal.Decimal
+	BeforeQuantity decimal.Decimal
+	AfterQuantity  decimal.Decimal
+	Price          decimal.Decimal
+	RealizedPnl    decimal.Decimal
+	Fee            decimal.Decimal // U本位
+
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	CompletedAt time.Time
 }
 
 type PositionService interface {
-	// GetPositionRisk 获取账户的持仓风险信息（仓位方向、仓位大小、未实现盈亏、标记价格、强平价等）
-	GetActivePosition(ctx context.Context, pair TradingPair) ([]Position, error)
+	GetActivePositions(ctx context.Context, pairs []TradingPair) ([]Position, error)
 
-	GetActivePositions(ctx context.Context) ([]Position, error)
+	GetHistoryPositions(ctx context.Context, req GetHistoryPositionsReq) ([]PositionHistory, error)
 
-	GetHistoryPositions(ctx context.Context, req GetHistoryPositionsReq) ([]Position, error)
-
-	ChangeLeverage(ctx context.Context, req ChangeLeverageReq) error
+	SetLeverage(ctx context.Context, req SetLeverageReq) error
 }
 
-type ChangeLeverageReq struct {
+type SetLeverageReq struct {
 	TradingPair TradingPair
 	Leverage    int
 }
 
 type GetHistoryPositionsReq struct {
-	TradingPair TradingPair
-	Limit       int
-	StartTime   time.Time
-	EndTime     time.Time
+	TradingPairs []TradingPair
+	StartTime    time.Time
+	EndTime      time.Time
 }
