@@ -7,16 +7,11 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-type AccountBalance struct {
-	AccountAlias     string
-	Asset            string
-	Balance          decimal.Decimal
-	UnrealizedPnl    decimal.Decimal
+type AccountInfo struct {
+	TotalBalance     decimal.Decimal
 	AvailableBalance decimal.Decimal
-}
-
-type Cursor[T any] interface {
-	Next() ([]T, error)
+	UnrealizedPnl    decimal.Decimal
+	UsedMargin       decimal.Decimal
 }
 
 type TransferHistoryType string
@@ -44,8 +39,12 @@ type TransferHistory struct {
 	Status    TransferStatus
 }
 
+type GetTransferHistoryReq struct {
+	StartTime time.Time
+	EndTime   time.Time
+}
+
 type AccountService interface {
-	UpdateLeverage(ctx context.Context, TradingPair TradingPair, leverage int) error
-	Balances(ctx context.Context) ([]AccountBalance, error)
-	TransferHistody(ctx context.Context) (Cursor[TransferHistory], error)
+	GetAccountInfo(ctx context.Context) (AccountInfo, error)
+	GetTransferHistory(ctx context.Context, req GetTransferHistoryReq) ([]TransferHistory, error)
 }

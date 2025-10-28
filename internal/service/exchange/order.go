@@ -13,10 +13,7 @@ import (
 type OrderId string
 
 func (id OrderId) IsZero() bool {
-	if id == "" {
-		return true
-	}
-	return false
+	return id == ""
 }
 func (id OrderId) ToString() string {
 	return string(id)
@@ -33,88 +30,66 @@ func (id OrderId) ToInt64() int64 {
 type OrderService interface {
 	// create
 	CreateOrder(ctx context.Context, req CreateOrderReq) (OrderId, error)
-	CreateBatchOrders(ctx context.Context, req []CreateOrderReq) ([]OrderId, error)
+	CreateOrders(ctx context.Context, req []CreateOrderReq) ([]OrderId, error)
 
-	// modify
+	// modify unfulfilled orders
 	ModifyOrder(ctx context.Context, req ModifyOrderReq) error
-	ModifyBatchOrders(ctx context.Context, req []ModifyOrderReq) error
+	ModifyOrders(ctx context.Context, req []ModifyOrderReq) error
 
-	// get
+	// get unfulfilled orders
 	GetOrder(ctx context.Context, req GetOrderReq) (*OrderInfo, error)
-	GetOpenOrder(ctx context.Context, req GetOpenOrderReq) (*OrderInfo, error)
+	GetOrders(ctx context.Context, req GetOrdersReq) ([]OrderInfo, error)
 
-	// list
-	ListOrders(ctx context.Context, req ListOrdersReq) ([]OrderInfo, error)
-	ListOpenOrders(ctx context.Context, req ListOpenOrdersReq) ([]OrderInfo, error)
-
-	// cancel order
-	CancelOrder(ctx context.Context, req CancelOrderReq) error                   // cancel the order with a specified id for a certain trading pair
-	CancelAllOpenOrders(ctx context.Context, req CancelAllOpenOrdersReq) error   // cancel all unfulfilled orders
-	CancelMultipleOrders(ctx context.Context, req CancelMultipleOrdersReq) error //batch cancel orders
+	CancelOrder(ctx context.Context, req CancelOrderReq) error
+	CancelOrders(ctx context.Context, req CancelOrdersReq) error
 }
 
 // create req
 type CreateOrderReq struct {
-	Symbol    TradingPair
-	Side      OrderSide
-	OrderType OrderType
-	Price     decimal.Decimal // 限价单时有效
-	Quantity  decimal.Decimal //  多少个交易对
-	Leverage  int             // 杠杆倍数， 实际仓位= amount * 交易对price || 需要保证金= 实际仓位 /  leverage
+	TradingPair TradingPair
+	Side        OrderSide
+	OrderType   OrderType
+	PositonSide PositionSide
+	Price       decimal.Decimal // 限价单时有效
+	Quantity    decimal.Decimal //  多少个交易对
+	Leverage    int             // 杠杆倍数， 实际仓位= amount * 交易对price || 需要保证金= 实际仓位 /  leverage
 }
 
 // modify req
 type ModifyOrderReq struct {
-	Id       OrderId
-	Symbol   TradingPair
-	Side     OrderSide
-	Price    decimal.Decimal // 限价单时有效
-	Quantity decimal.Decimal //  多少个交易对
-	Leverage int             // 杠杆倍数，
+	Id          OrderId
+	TradingPair TradingPair
+	Side        OrderSide
+	Price       decimal.Decimal // 限价单时有效
+	Quantity    decimal.Decimal //  多少个交易对
+	Leverage    int             // 杠杆倍数，
+}
+
+type GetOrderReq struct {
+	Id          OrderId
+	TradingPair TradingPair
 }
 
 // get req
-type GetOrderReq struct {
-	Id     OrderId
-	Symbol TradingPair
-}
-type GetOpenOrderReq struct {
-	Id     OrderId
-	Symbol TradingPair
+type GetOrdersReq struct {
+	TradingPair TradingPair
 }
 
-// list req
-type ListOrdersReq struct {
-	Symbol    TradingPair
-	Limit     int
-	StartTime time.Time
-	EndTime   time.Time
-}
-type ListOpenOrdersReq struct {
-	Symbol    TradingPair
-	Limit     int
-	StartTime time.Time
-	EndTime   time.Time
+type CancelOrdersReq struct {
+	TradingPair TradingPair // if trading pair is empty, cancel all orders
+	Ids         []OrderId   // if ids is empty, cancel all orders of the trading pair
 }
 
-// cancel req
 type CancelOrderReq struct {
-	Symbol TradingPair
-	Id     OrderId
-}
-type CancelAllOpenOrdersReq struct {
-	Symbol TradingPair
-}
-type CancelMultipleOrdersReq struct {
-	Symbol TradingPair
-	Ids    []OrderId
+	Id          OrderId
+	TradingPair TradingPair
 }
 
 type OrderSide string
 
 const (
-	OrderSideLong  OrderSide = "BUY"
-	OrderSideShort OrderSide = "SELL"
+	OrderSideBuy  OrderSide = "BUY"
+	OrderSideSell OrderSide = "SELL"
 )
 
 type PositionSide string
@@ -124,15 +99,32 @@ const (
 	PositionSideShort PositionSide = "SHORT"
 )
 
+// GetCloseOrderSide 根据持仓方向获取平仓订单方向
+func (ps PositionSide) GetCloseOrderSide() OrderSide {
+	switch ps {
+	case PositionSideLong:
+		return OrderSideSell // 多头平仓用卖单
+	case PositionSideShort:
+		return OrderSideBuy // 空头平仓用买单
+	default:
+		return OrderSideSell
+	}
+}
+
 type OrderStatus string
 
 // 创建一个订单，是不是就一个id，订单成交了是不是就变成一个仓位了，仓位应该有一个单独的id
 // 这个时候是不是可以用之前订单的id去撤销未完全成交的订单
 const (
-	OrderStatusPending         = "pending"
-	OrderStatusFilled          = "filled"
-	OrderStatusPartiallyFilled = "partially_filled"
+	OrderStatusPending         OrderStatus = "pending"
+	OrderStatusFilled          OrderStatus = "filled"
+	OrderStatusPartiallyFilled OrderStatus = "partially_filled"
 )
+
+// IsFilled 判断订单是否已完全成交
+func (s OrderStatus) IsFilled() bool {
+	return s == OrderStatusFilled
+}
 
 type OrderType string
 
@@ -144,12 +136,27 @@ const (
 )
 
 type OrderInfo struct {
-	Id          string
-	TradingPair TradingPair
-	Side        OrderSide
-	Price       decimal.Decimal
-	Quantity    decimal.Decimal
-	Status      OrderStatus
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	Id               string
+	TradingPair      TradingPair
+	Side             OrderSide
+	Price            decimal.Decimal
+	Quantity         decimal.Decimal
+	ExecutedQuantity decimal.Decimal // 已成交数量
+	Status           OrderStatus
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	CompletedAt      time.Time
+}
+
+// IsActive 判断订单是否处于活跃状态（未完全成交）
+func (o *OrderInfo) IsActive() bool {
+	return !o.Status.IsFilled()
+}
+
+// GetFilledPercentage 获取订单成交百分比
+func (o *OrderInfo) GetFilledPercentage() decimal.Decimal {
+	if o.Quantity.IsZero() {
+		return decimal.Zero
+	}
+	return o.ExecutedQuantity.Div(o.Quantity).Mul(decimal.NewFromInt(100))
 }

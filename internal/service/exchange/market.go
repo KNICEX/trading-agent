@@ -28,6 +28,9 @@ func SplitSymbol(s string) (string, string) {
 	return s, ""
 }
 
+func (s *TradingPair) IsZero() bool {
+	return s.Base == "" || s.Quote == ""
+}
 func (s *TradingPair) ToString() string {
 	return fmt.Sprintf("%s%s", s.Base, s.Quote)
 }
@@ -43,7 +46,6 @@ func (i Interval) ToString() string {
 }
 
 const (
-	Interval1m  Interval = "1m"
 	Interval3m  Interval = "3m"
 	Interval5m  Interval = "5m"
 	Interval15m Interval = "15m"
@@ -69,11 +71,16 @@ type Kline struct {
 	Low              decimal.Decimal
 	Volume           decimal.Decimal // 成交量
 	QuoteAssetVolume decimal.Decimal // 成交额
-	TradeNum         int64           // 成交笔数
 }
 
 type MarketService interface {
-	GetKlines(ctx context.Context, symbol TradingPair, interval Interval, startTime, endTime time.Time) ([]Kline, error)
+	GetKlines(ctx context.Context, req GetKlinesReq) ([]*Kline, error)
+}
+type GetKlinesReq struct {
+	TradingPair        TradingPair
+	Interval           Interval
+	StartTime, EndTime time.Time
+	Limit              int
 }
 type SymbolService interface {
 	GetAllSymbols(ctx context.Context) ([]TradingPair, error)

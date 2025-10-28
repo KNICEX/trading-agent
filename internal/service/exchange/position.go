@@ -17,8 +17,8 @@ const (
 )
 
 type Position struct {
-	Symbol           TradingPair
-	Side             OrderSide
+	TradingPair      TradingPair
+	PositionSide     PositionSide
 	EntryPrice       decimal.Decimal
 	BreakEvenPrice   decimal.Decimal
 	MarginType       MarginType
@@ -29,11 +29,66 @@ type Position struct {
 	// 保证金
 	MarginAmount     decimal.Decimal
 	UnrealizedProfit decimal.Decimal
-	UpdatedAt        time.Time
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type PositionHistory struct {
+	TradingPair  TradingPair
+	PositionSide PositionSide
+	EntryPrice   decimal.Decimal
+	ClosePrice   decimal.Decimal
+	MaxQuantity  decimal.Decimal
+	OpenedAt     time.Time
+	ClosedAt     time.Time
+
+	Events []PositionEvent
+}
+
+type PositionEventType string
+
+const (
+	// 创建仓位
+	PositionEventTypeCreate PositionEventType = "CREATE"
+	// 增加仓位
+	PositionEventTypeIncrease PositionEventType = "INCREASE"
+	// 减少仓位
+	PositionEventTypeDecrease PositionEventType = "DECREASE"
+	// 完全平仓
+	PositionEventTypeClose PositionEventType = "CLOSE"
+)
+
+type PositionEvent struct {
+	OrderId        OrderId
+	EventType      PositionEventType
+	Quantity       decimal.Decimal
+	BeforeQuantity decimal.Decimal
+	AfterQuantity  decimal.Decimal
+	Price          decimal.Decimal
+	RealizedPnl    decimal.Decimal
+	Fee            decimal.Decimal // U本位
+
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	CompletedAt time.Time
 }
 
 type PositionService interface {
-	GetPositions(ctx context.Context) ([]Position, error)
-	// 平仓api在订单部分
-	ClosePositon(ctx context.Context, symbol TradingPair, side OrderSide) error
+	GetActivePositions(ctx context.Context, pairs []TradingPair) ([]Position, error)
+
+	GetHistoryPositions(ctx context.Context, req GetHistoryPositionsReq) ([]PositionHistory, error)
+
+	SetLeverage(ctx context.Context, req SetLeverageReq) error
+}
+
+type SetLeverageReq struct {
+	TradingPair TradingPair
+	Leverage    int
+}
+
+type GetHistoryPositionsReq struct {
+	TradingPairs []TradingPair
+	StartTime    time.Time
+	EndTime      time.Time
 }
