@@ -14,11 +14,11 @@ func newOrderService(t *testing.T) *OrderService {
 
 func TestCreateOrder(t *testing.T) {
 	order := exchange.CreateOrderReq{
-		Symbol:    exchange.TradingPair{Base: "BTC", Quote: "USDT"},
-		Side:      exchange.OrderSideBuy,
-		Quantity:  decimal.NewFromFloat(0.001),
-		Price:     decimal.NewFromFloat(100000),
-		OrderType: exchange.OrderTypeLimit,
+		TradingPair: exchange.TradingPair{Base: "BTC", Quote: "USDT"},
+		Side:        exchange.OrderSideBuy,
+		Quantity:    decimal.NewFromFloat(0.001),
+		Price:       decimal.NewFromFloat(100000),
+		OrderType:   exchange.OrderTypeLimit,
 	}
 	svc := newOrderService(t)
 	orderId, err := svc.CreateOrder(context.Background(), order)
@@ -42,7 +42,7 @@ func TestCancelOrder(t *testing.T) {
 
 func TestListOrders(t *testing.T) {
 	svc := newOrderService(t)
-	orders, err := svc.ListOrders(context.Background(), exchange.ListOrdersReq{
+	orders, err := svc.GetOrders(context.Background(), exchange.GetOrdersReq{
 		TradingPair: exchange.TradingPair{Base: "BTC", Quote: "USDT"},
 	})
 	if err != nil {
@@ -88,7 +88,7 @@ func TestMarketClosePosiiton(t *testing.T) {
 	}
 
 	orderId, err := svc.CreateOrder(context.Background(), exchange.CreateOrderReq{
-		Symbol:      exchange.TradingPair{Base: "BTC", Quote: "USDT"},
+		TradingPair: exchange.TradingPair{Base: "BTC", Quote: "USDT"},
 		Side:        orderSide,
 		PositonSide: position[0].PositionSide,
 		Quantity:    position[0].PositionAmount.Abs(),

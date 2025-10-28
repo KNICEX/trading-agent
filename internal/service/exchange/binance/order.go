@@ -8,6 +8,7 @@ import (
 
 	"github.com/KNICEX/trading-agent/internal/service/exchange"
 	"github.com/adshao/go-binance/v2/futures"
+	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
 )
 
@@ -24,7 +25,7 @@ func NewOrderService(cli *futures.Client) *OrderService {
 
 func (o *OrderService) CreateOrder(ctx context.Context, req exchange.CreateOrderReq) (exchange.OrderId, error) {
 	service := o.cli.NewCreateOrderService().
-		Symbol(req.Symbol.ToString()).
+		Symbol(req.TradingPair.ToString()).
 		Side(futures.SideType(req.Side)).                       // BUY / SELL
 		Type(futures.OrderType(req.OrderType)).                 // LIMIT / MARKET
 		Quantity(req.Quantity.String()).                        // 下单数量
@@ -41,11 +42,11 @@ func (o *OrderService) CreateOrder(ctx context.Context, req exchange.CreateOrder
 	return exchange.OrderId(strconv.FormatInt(order.OrderID, 10)), nil
 }
 
-func (o *OrderService) CreateBatchOrders(ctx context.Context, req []exchange.CreateOrderReq) ([]exchange.OrderId, error) {
+func (o *OrderService) CreateOrders(ctx context.Context, req []exchange.CreateOrderReq) ([]exchange.OrderId, error) {
 	var orderList []*futures.CreateOrderService
 	for _, orderReq := range req {
 		orderList = append(orderList, o.cli.NewCreateOrderService().
-			Symbol(orderReq.Symbol.ToString()).
+			Symbol(orderReq.TradingPair.ToString()).
 			Side(futures.SideType(orderReq.Side)).                        // BUY / SELL
 			Type(futures.OrderType(orderReq.OrderType)).                  // LIMIT / MARKET
 			Quantity(orderReq.Quantity.String()).                         // 下单数量
@@ -89,39 +90,33 @@ func (o *OrderService) ModifyOrder(ctx context.Context, req exchange.ModifyOrder
 	return nil
 }
 
-func (o *OrderService) GetOrder(ctx context.Context, req exchange.GetOrderReq) (*exchange.OrderInfo, error) {
-	order, err := o.cli.NewGetOrderService().
-		Symbol(req.Symbol.ToString()).
-		OrderID(req.Id.ToInt64()).
-		Do(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get order failed: %w", err)
+func (o *OrderService) ModifyOrders(ctx context.Context, req []exchange.ModifyOrderReq) error {
+	var orderList []*futures.ModifyOrder
+	for _, orderReq := range req {
+		orderList = append(orderList, (&futures.ModifyOrder{}).
+			Symbol(orderReq.TradingPair.ToString()).
+			Side(futures.SideType(orderReq.Side)).
+			Quantity(orderReq.Quantity.String()).
+			Price(orderReq.Price.String()).
+			OrderID(orderReq.Id.ToInt64()))
 	}
 
-	price, _ := decimal.NewFromString(order.Price)
-	amount, _ := decimal.NewFromString(order.OrigQuantity)
-	executedQty, _ := decimal.NewFromString(order.ExecutedQuantity)
-
-	return &exchange.OrderInfo{
-		Id:               strconv.FormatInt(order.OrderID, 10),
-		TradingPair:      req.Symbol,
-		Side:             exchange.OrderSide(order.Side),
-		Price:            price,
-		Quantity:         amount,
-		ExecutedQuantity: executedQty,
-		Status:           exchange.OrderStatus(order.Status),
-		CreatedAt:        time.UnixMilli(order.Time),
-		UpdatedAt:        time.UnixMilli(order.UpdateTime),
-	}, nil
+	_, err := o.cli.NewModifyBatchOrdersService().
+		OrderList(orderList).
+		Do(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to modify orders: %w", err)
+	}
+	return nil
 }
 
-func (o *OrderService) GetOpenOrder(ctx context.Context, req exchange.GetOpenOrderReq) (*exchange.OrderInfo, error) {
-	order, err := o.cli.NewGetOpenOrderService().
+func (o *OrderService) GetOrder(ctx context.Context, req exchange.GetOrderReq) (*exchange.OrderInfo, error) {
+	order, err := o.cli.NewGetOrderService().
 		Symbol(req.TradingPair.ToString()).
 		OrderID(req.Id.ToInt64()).
 		Do(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get open order failed: %w", err)
+		return nil, fmt.Errorf("get order failed: %w", err)
 	}
 
 	price, _ := decimal.NewFromString(order.Price)
@@ -141,62 +136,23 @@ func (o *OrderService) GetOpenOrder(ctx context.Context, req exchange.GetOpenOrd
 	}, nil
 }
 
-func (o *OrderService) ListOrders(ctx context.Context, req exchange.ListOrdersReq) ([]exchange.OrderInfo, error) {
-	svc := o.cli.NewListOrdersService().
-		Symbol(req.TradingPair.ToString())
-
-	if req.Limit > 0 {
-		svc = svc.Limit(req.Limit)
-	}
-	if !req.StartTime.IsZero() {
-		svc = svc.StartTime(req.StartTime.UnixMilli())
-	}
-	if !req.EndTime.IsZero() {
-		svc = svc.EndTime(req.EndTime.UnixMilli())
-	}
-
-	orders, err := svc.Do(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list orders failed: %w", err)
-	}
-
-	results := make([]exchange.OrderInfo, 0, len(orders))
-	for _, oinfo := range orders {
-		price, _ := decimal.NewFromString(oinfo.Price)
-		amount, _ := decimal.NewFromString(oinfo.OrigQuantity)
-		executedQty, _ := decimal.NewFromString(oinfo.ExecutedQuantity)
-		results = append(results, exchange.OrderInfo{
-			Id:               strconv.FormatInt(oinfo.OrderID, 10),
-			TradingPair:      req.TradingPair,
-			Side:             exchange.OrderSide(oinfo.Side),
-			Price:            price,
-			Quantity:         amount,
-			ExecutedQuantity: executedQty,
-			Status:           o.orderStatus(oinfo.Status),
-			CreatedAt:        time.UnixMilli(oinfo.Time),
-			UpdatedAt:        time.UnixMilli(oinfo.UpdateTime),
-		})
-	}
-	return results, nil
-}
-
-func (o *OrderService) ListOpenOrders(ctx context.Context, req exchange.ListOpenOrdersReq) ([]exchange.OrderInfo, error) {
-	svc := o.cli.NewListOpenOrdersService()
+func (o *OrderService) GetOrders(ctx context.Context, req exchange.GetOrdersReq) ([]exchange.OrderInfo, error) {
+	svc := o.cli.NewListOrdersService()
+	var binanceOrders []*futures.Order
+	var err error
 	// symbol 可选 不传时返回所有
-	if req.TradingPair.ToString() != "" {
-		svc = svc.Symbol(req.TradingPair.ToString())
+	if req.TradingPair.IsZero() {
+		binanceOrders, err = svc.Do(ctx)
+	} else {
+		binanceOrders, err = svc.Symbol(req.TradingPair.ToString()).Do(ctx)
 	}
 
-	orders, err := svc.Do(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list open orders failed: %w", err)
+		return nil, err
 	}
 
-	results := make([]exchange.OrderInfo, 0, len(orders))
-	for _, oinfo := range orders {
-		if oinfo.Status == futures.OrderStatusTypeCanceled {
-			continue
-		}
+	results := make([]exchange.OrderInfo, 0, len(binanceOrders))
+	for _, oinfo := range binanceOrders {
 		price, _ := decimal.NewFromString(oinfo.Price)
 		amount, _ := decimal.NewFromString(oinfo.OrigQuantity)
 		executedQty, _ := decimal.NewFromString(oinfo.ExecutedQuantity)
@@ -224,21 +180,19 @@ func (o *OrderService) CancelOrder(ctx context.Context, req exchange.CancelOrder
 	return err
 }
 
-func (o *OrderService) CancelAllOpenOrders(ctx context.Context, req exchange.CancelAllOpenOrdersReq) error {
-	err := o.cli.NewCancelAllOpenOrdersService().
-		Symbol(req.TradingPair.ToString()).
-		Do(ctx)
-	return err
-}
+func (o *OrderService) CancelOrders(ctx context.Context, req exchange.CancelOrdersReq) error {
+	if req.TradingPair.IsZero() {
+		return o.cli.NewCancelAllOpenOrdersService().
+			Do(ctx)
 
-func (o *OrderService) CancelMultipleOrders(ctx context.Context, req exchange.CancelMultipleOrdersReq) error {
-	var orderIds []int64
-	for _, id := range req.Ids {
-		orderIds = append(orderIds, id.ToInt64())
 	}
+	if len(req.Ids) == 0 {
+		return o.cli.NewCancelAllOpenOrdersService().Symbol(req.TradingPair.ToString()).Do(ctx)
+	}
+
 	_, err := o.cli.NewCancelMultipleOrdersService().
 		Symbol(req.TradingPair.ToString()).
-		OrderIDList(orderIds).
+		OrderIDList(lo.Map(req.Ids, func(id exchange.OrderId, _ int) int64 { return id.ToInt64() })).
 		Do(ctx)
 	return err
 }

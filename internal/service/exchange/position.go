@@ -29,6 +29,8 @@ type Position struct {
 	// 保证金
 	MarginAmount     decimal.Decimal
 	UnrealizedProfit decimal.Decimal
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type PositionService interface {
