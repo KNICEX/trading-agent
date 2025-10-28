@@ -70,17 +70,17 @@ func (p *PositonService) GetActivePositions(ctx context.Context, pairs []exchang
 			MarkPrice:        decimal.RequireFromString(v.MarkPrice),
 			MarginType:       exchange.MarginType(v.MarginType),
 			Leverage:         leverage,
-			PositionAmount:   decimal.RequireFromString(v.PositionAmt),
+			Quantity:         decimal.RequireFromString(v.PositionAmt),
 			MarginAmount:     decimal.RequireFromString(v.IsolatedMargin),
-			UnrealizedProfit: decimal.RequireFromString(v.UnRealizedProfit),
+			UnrealizedPnl:    decimal.RequireFromString(v.UnRealizedProfit),
 		}
 
 		// 过滤掉未成交的仓位
-		if position.PositionAmount.Equal(decimal.Zero) {
+		if position.Quantity.Equal(decimal.Zero) {
 			continue
 		}
 		// TODO margin计算公式尚有疑问，需要确认
-		margin := position.EntryPrice.Mul(position.PositionAmount).Div(decimal.NewFromInt(int64(position.Leverage))).Abs().Round(2)
+		margin := position.EntryPrice.Mul(position.Quantity).Div(decimal.NewFromInt(int64(position.Leverage))).Abs().Round(2)
 		position.MarginAmount = margin
 		positions = append(positions, position)
 	}

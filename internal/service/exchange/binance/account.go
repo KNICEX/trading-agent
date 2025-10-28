@@ -26,11 +26,13 @@ func (s *AccountService) GetAccountInfo(ctx context.Context) (exchange.AccountIn
 		return exchange.AccountInfo{}, err
 	}
 
+	// MaxWithdrawAmount 是真正可用于开新仓的资金（已扣除挂单锁定的保证金）
+	// AvailableBalance 不准确，不会扣除挂单锁定的资金
 	return exchange.AccountInfo{
 		TotalBalance:     decimal.RequireFromString(account.TotalWalletBalance),
-		AvailableBalance: decimal.RequireFromString(account.AvailableBalance),
+		AvailableBalance: decimal.RequireFromString(account.MaxWithdrawAmount),
 		UnrealizedPnl:    decimal.RequireFromString(account.TotalUnrealizedProfit),
-		UsedMargin:       decimal.RequireFromString(account.TotalInitialMargin), // 修正：使用 TotalInitialMargin
+		UsedMargin:       decimal.RequireFromString(account.TotalInitialMargin), // TotalInitialMargin = 持仓保证金 + 挂单保证金
 	}, nil
 }
 
