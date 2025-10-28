@@ -24,16 +24,25 @@ func NewOrderService(cli *futures.Client) *OrderService {
 }
 
 func (o *OrderService) CreateOrder(ctx context.Context, req exchange.CreateOrderReq) (exchange.OrderId, error) {
+	// 将接口层的 OrderType 转换为币安的 OrderType
+	binanceType := o.binanceOrderType(req.OrderType, req.Price)
+
+	// 根据 OrderType 和 PositionSide 自动计算 Side
+	side := o.calculateOrderSide(req.OrderType, req.PositonSide)
+
 	service := o.cli.NewCreateOrderService().
 		Symbol(req.TradingPair.ToString()).
-		Side(futures.SideType(req.Side)).                       // BUY / SELL
-		Type(futures.OrderType(req.OrderType)).                 // LIMIT / MARKET
+		Side(futures.SideType(side)).                           // 自动计算的 BUY / SELL
+		Type(binanceType).                                      // 币安的订单类型
 		Quantity(req.Quantity.String()).                        // 下单数量
 		PositionSide(futures.PositionSideType(req.PositonSide)) // LONG / SHORT
-	if req.OrderType != exchange.OrderTypeMarket {
+
+	// 限价单需要设置价格和有效期
+	if binanceType == futures.OrderTypeLimit {
 		service = service.Price(req.Price.String())
 		service = service.TimeInForce(futures.TimeInForceTypeGTC)
 	}
+
 	order, err := service.Do(ctx)
 	if err != nil {
 		return "", fmt.Errorf("create order failed: %w", err)
@@ -42,17 +51,76 @@ func (o *OrderService) CreateOrder(ctx context.Context, req exchange.CreateOrder
 	return exchange.OrderId(strconv.FormatInt(order.OrderID, 10)), nil
 }
 
+// calculateOrderSide 根据 OrderType 和 PositionSide 自动计算 Side
+func (o *OrderService) calculateOrderSide(orderType exchange.OrderType, positionSide exchange.PositionSide) exchange.OrderSide {
+	switch orderType {
+	case exchange.OrderTypeOpen:
+		// 开仓：LONG 用买单，SHORT 用卖单
+		if positionSide == exchange.PositionSideLong {
+			return exchange.OrderSideBuy
+		}
+		return exchange.OrderSideSell
+
+	case exchange.OrderTypeClose:
+		// 平仓：LONG 用卖单，SHORT 用买单
+		if positionSide == exchange.PositionSideLong {
+			return exchange.OrderSideSell
+		}
+		return exchange.OrderSideBuy
+
+	default:
+		return exchange.OrderSideBuy
+	}
+}
+
+// binanceOrderType 将接口层的 OrderType 转换为币安的 OrderType
+// 根据 orderType（开仓/平仓）和 price（是否为0）判断具体的币安订单类型
+func (o *OrderService) binanceOrderType(orderType exchange.OrderType, price decimal.Decimal) futures.OrderType {
+	// 根据是否有价格判断市价还是限价
+	isMarket := price.IsZero()
+
+	switch orderType {
+	case exchange.OrderTypeOpen:
+		// 开仓
+		if isMarket {
+			return futures.OrderTypeMarket
+		}
+		return futures.OrderTypeLimit
+
+	case exchange.OrderTypeClose:
+		// 平仓
+		if isMarket {
+			return futures.OrderTypeMarket
+		}
+		return futures.OrderTypeLimit
+
+	default:
+		// 默认限价
+		return futures.OrderTypeLimit
+	}
+}
+
 func (o *OrderService) CreateOrders(ctx context.Context, req []exchange.CreateOrderReq) ([]exchange.OrderId, error) {
 	var orderList []*futures.CreateOrderService
 	for _, orderReq := range req {
-		orderList = append(orderList, o.cli.NewCreateOrderService().
+		// 自动计算 Side 和 BinanceOrderType
+		side := o.calculateOrderSide(orderReq.OrderType, orderReq.PositonSide)
+		binanceType := o.binanceOrderType(orderReq.OrderType, orderReq.Price)
+
+		service := o.cli.NewCreateOrderService().
 			Symbol(orderReq.TradingPair.ToString()).
-			Side(futures.SideType(orderReq.Side)).                        // BUY / SELL
-			Type(futures.OrderType(orderReq.OrderType)).                  // LIMIT / MARKET
-			Quantity(orderReq.Quantity.String()).                         // 下单数量
-			Price(orderReq.Price.String()).                               // 限价单才需要
-			PositionSide(futures.PositionSideType(orderReq.PositonSide)). // LONG / SHORT
-			TimeInForce(futures.TimeInForceTypeGTC))
+			Side(futures.SideType(side)).                                // 自动计算的 BUY / SELL
+			Type(binanceType).                                           // 转换后的币安订单类型
+			Quantity(orderReq.Quantity.String()).                        // 下单数量
+			PositionSide(futures.PositionSideType(orderReq.PositonSide)) // LONG / SHORT
+
+		// 限价单需要设置价格
+		if binanceType == futures.OrderTypeLimit {
+			service = service.Price(orderReq.Price.String())
+			service = service.TimeInForce(futures.TimeInForceTypeGTC)
+		}
+
+		orderList = append(orderList, service)
 	}
 
 	orders, err := o.cli.NewCreateBatchOrdersService().
@@ -110,24 +178,31 @@ func (o *OrderService) ModifyOrders(ctx context.Context, req []exchange.ModifyOr
 	return nil
 }
 
-func (o *OrderService) GetOrder(ctx context.Context, req exchange.GetOrderReq) (*exchange.OrderInfo, error) {
+func (o *OrderService) GetOrder(ctx context.Context, req exchange.GetOrderReq) (exchange.OrderInfo, error) {
 	order, err := o.cli.NewGetOrderService().
 		Symbol(req.TradingPair.ToString()).
 		OrderID(req.Id.ToInt64()).
 		Do(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get order failed: %w", err)
+		return exchange.OrderInfo{}, fmt.Errorf("get order failed: %w", err)
+	}
+
+	if order.Status != futures.OrderStatusTypeNew && order.Status != futures.OrderStatusTypePartiallyFilled {
+		// 只需要返回未成交或部分成交的订单
+		return exchange.OrderInfo{}, fmt.Errorf("order is not active: %s", order.Status)
 	}
 
 	price, _ := decimal.NewFromString(order.Price)
+	stopPrice, _ := decimal.NewFromString(order.StopPrice)
 	amount, _ := decimal.NewFromString(order.OrigQuantity)
 	executedQty, _ := decimal.NewFromString(order.ExecutedQuantity)
 
-	return &exchange.OrderInfo{
+	return exchange.OrderInfo{
 		Id:               strconv.FormatInt(order.OrderID, 10),
 		TradingPair:      req.TradingPair,
 		Side:             exchange.OrderSide(order.Side),
 		Price:            price,
+		StopPrice:        stopPrice,
 		Quantity:         amount,
 		ExecutedQuantity: executedQty,
 		Status:           exchange.OrderStatus(order.Status),
@@ -153,7 +228,12 @@ func (o *OrderService) GetOrders(ctx context.Context, req exchange.GetOrdersReq)
 
 	results := make([]exchange.OrderInfo, 0, len(binanceOrders))
 	for _, oinfo := range binanceOrders {
+		if oinfo.Status != futures.OrderStatusTypeNew && oinfo.Status != futures.OrderStatusTypePartiallyFilled {
+			// 只需要返回未成交或部分成交的订单
+			continue
+		}
 		price, _ := decimal.NewFromString(oinfo.Price)
+		stopPrice, _ := decimal.NewFromString(oinfo.StopPrice)
 		amount, _ := decimal.NewFromString(oinfo.OrigQuantity)
 		executedQty, _ := decimal.NewFromString(oinfo.ExecutedQuantity)
 		base, quote := exchange.SplitSymbol(oinfo.Symbol)
@@ -162,6 +242,7 @@ func (o *OrderService) GetOrders(ctx context.Context, req exchange.GetOrdersReq)
 			TradingPair:      exchange.TradingPair{Base: base, Quote: quote},
 			Side:             exchange.OrderSide(oinfo.Side),
 			Price:            price,
+			StopPrice:        stopPrice,
 			Quantity:         amount,
 			ExecutedQuantity: executedQty,
 			Status:           o.orderStatus(oinfo.Status),

@@ -13,6 +13,11 @@ type MarketService struct {
 	cli *futures.Client
 }
 
+// NewMarketService 创建市场数据服务
+func NewMarketService(cli *futures.Client) *MarketService {
+	return &MarketService{cli: cli}
+}
+
 func (m *MarketService) convertKlines(klines []*futures.Kline) []*exchange.Kline {
 	kls := make([]*exchange.Kline, len(klines))
 	for i, k := range klines {
@@ -54,7 +59,7 @@ func (m *MarketService) convertKlines(klines []*futures.Kline) []*exchange.Kline
 	return kls
 }
 func (m *MarketService) GetKlines(ctx context.Context, req exchange.GetKlinesReq) ([]*exchange.Kline, error) {
-	svc := m.cli.NewKlinesService().Symbol(req.TradingPair.ToSlashString())
+	svc := m.cli.NewKlinesService().Symbol(req.TradingPair.ToString()) // 币安合约API使用 BTCUSDT 格式，不是 BTC/USDT
 	if req.Interval != "" {
 		svc.Interval(req.Interval.ToString())
 	}

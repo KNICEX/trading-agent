@@ -37,7 +37,7 @@ type OrderService interface {
 	ModifyOrders(ctx context.Context, req []ModifyOrderReq) error
 
 	// get unfulfilled orders
-	GetOrder(ctx context.Context, req GetOrderReq) (*OrderInfo, error)
+	GetOrder(ctx context.Context, req GetOrderReq) (OrderInfo, error)
 	GetOrders(ctx context.Context, req GetOrdersReq) ([]OrderInfo, error)
 
 	CancelOrder(ctx context.Context, req CancelOrderReq) error
@@ -47,12 +47,15 @@ type OrderService interface {
 // create req
 type CreateOrderReq struct {
 	TradingPair TradingPair
-	Side        OrderSide
-	OrderType   OrderType
-	PositonSide PositionSide
+	OrderType   OrderType       // OPEN / CLOSE
+	PositonSide PositionSide    // LONG / SHORT
 	Price       decimal.Decimal // 限价单时有效
-	Quantity    decimal.Decimal //  多少个交易对
-	Leverage    int             // 杠杆倍数， 实际仓位= amount * 交易对price || 需要保证金= 实际仓位 /  leverage
+	Quantity    decimal.Decimal
+	// Side 会根据 OrderType 和 PositionSide 自动计算：
+	// - OPEN + LONG = BUY
+	// - OPEN + SHORT = SELL
+	// - CLOSE + LONG = SELL
+	// - CLOSE + SHORT = BUY
 }
 
 // modify req
@@ -61,8 +64,7 @@ type ModifyOrderReq struct {
 	TradingPair TradingPair
 	Side        OrderSide
 	Price       decimal.Decimal // 限价单时有效
-	Quantity    decimal.Decimal //  多少个交易对
-	Leverage    int             // 杠杆倍数，
+	Quantity    decimal.Decimal
 }
 
 type GetOrderReq struct {
@@ -129,17 +131,16 @@ func (s OrderStatus) IsFilled() bool {
 type OrderType string
 
 const (
-	OrderTypeLimit      OrderType = "LIMIT"
-	OrderTypeMarket     OrderType = "MARKET"
-	OrderTypeTakeProfit OrderType = "TAKE_PROFIT"
-	OrderTypeStopLoss   OrderType = "STOP_LOSS"
+	OrderTypeOpen  OrderType = "OPEN"
+	OrderTypeClose OrderType = "CLOSE"
 )
 
 type OrderInfo struct {
 	Id               string
 	TradingPair      TradingPair
 	Side             OrderSide
-	Price            decimal.Decimal
+	Price            decimal.Decimal // 限价单价格
+	StopPrice        decimal.Decimal // 止盈止损触发价格（STOP/TAKE_PROFIT 类型订单使用）
 	Quantity         decimal.Decimal
 	ExecutedQuantity decimal.Decimal // 已成交数量
 	Status           OrderStatus

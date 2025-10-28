@@ -25,10 +25,10 @@ type Position struct {
 	Leverage         int
 	LiquidationPrice decimal.Decimal
 	MarkPrice        decimal.Decimal
-	PositionAmount   decimal.Decimal
+	Quantity         decimal.Decimal
 	// 保证金
-	MarginAmount     decimal.Decimal
-	UnrealizedProfit decimal.Decimal
+	MarginAmount  decimal.Decimal
+	UnrealizedPnl decimal.Decimal
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
