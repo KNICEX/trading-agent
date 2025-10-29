@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/KNICEX/trading-agent/internal/service/exchange"
@@ -68,6 +69,20 @@ func (s *BaseSuite) SetupSuite() {
 	// 设置测试交易对和上下文
 	s.testPair = exchange.TradingPair{Base: "XRP", Quote: "USDT"}
 	s.ctx = context.Background()
+
+	// 设置双向持仓模式（Hedge Mode）
+	s.T().Log("  - 设置双向持仓模式...")
+	err = s.client.NewChangePositionModeService().DualSide(true).Do(s.ctx)
+	if err != nil {
+		// 如果已经是双向持仓模式，会返回错误，这是正常的
+		if strings.Contains(err.Error(), "No need to change position side") {
+			s.T().Log("    ✓ 双向持仓模式已启用")
+		} else {
+			s.T().Logf("    设置双向持仓模式失败（可能已经是双向模式）: %v", err)
+		}
+	} else {
+		s.T().Log("    ✓ 双向持仓模式已启用")
+	}
 
 	s.T().Log("✓ 测试套件初始化完成")
 }
