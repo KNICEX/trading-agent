@@ -62,7 +62,7 @@ func (m *MarketService) convertKlines(klines []*futures.Kline) []exchange.Kline 
 }
 func (m *MarketService) GetKlines(ctx context.Context, req exchange.GetKlinesReq) ([]exchange.Kline, error) {
 	svc := m.cli.NewKlinesService().Symbol(req.TradingPair.ToString()) // 币安合约API使用 BTCUSDT 格式，不是 BTC/USDT
-	if req.Interval != "" {
+	if req.Interval.ToString() != "" {
 		svc.Interval(req.Interval.ToString())
 	}
 	if !req.StartTime.IsZero() {
@@ -84,10 +84,6 @@ func (m *MarketService) SubscribeKline(ctx context.Context, tradingPair exchange
 	return ch, nil
 }
 
-func (m *MarketService) UnsubscribeKline(ctx context.Context, tradingPair exchange.TradingPair, interval exchange.Interval) error {
-	// TODO websocket unsubscribe kline
-	return nil
-}
 func (m *MarketService) Ticker(ctx context.Context, tradingPair exchange.TradingPair) (decimal.Decimal, error) {
 	prices, err := m.cli.NewListPricesService().Symbol(tradingPair.ToString()).Do(ctx)
 	if err != nil {

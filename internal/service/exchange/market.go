@@ -39,26 +39,32 @@ func (s *TradingPair) ToSlashString() string {
 	return fmt.Sprintf("%s/%s", s.Base, s.Quote)
 }
 
-type Interval string
-
-func (i Interval) ToString() string {
-	return string(i)
+type Interval struct {
+	duration time.Duration
+	str      string
 }
 
-const (
-	Interval5m  Interval = "5m"
-	Interval15m Interval = "15m"
-	Interval30m Interval = "30m"
-	Interval1h  Interval = "1h"
-	Interval2h  Interval = "2h"
-	Interval4h  Interval = "4h"
-	Interval6h  Interval = "6h"
-	Interval8h  Interval = "8h"
-	Interval12h Interval = "12h"
-	Interval1d  Interval = "1d"
-	Interval3d  Interval = "3d"
-	Interval1w  Interval = "1w"
-	Interval1M  Interval = "1M"
+func (i Interval) ToString() string {
+	return i.str
+}
+
+func (i Interval) Duration() time.Duration {
+	return i.duration
+}
+
+var (
+	Interval5m  Interval = Interval{duration: time.Minute * 5, str: "5m"}
+	Interval15m Interval = Interval{duration: time.Minute * 15, str: "15m"}
+	Interval30m Interval = Interval{duration: time.Minute * 30, str: "30m"}
+	Interval1h  Interval = Interval{duration: time.Hour, str: "1h"}
+	Interval2h  Interval = Interval{duration: time.Hour * 2, str: "2h"}
+	Interval4h  Interval = Interval{duration: time.Hour * 4, str: "4h"}
+	Interval6h  Interval = Interval{duration: time.Hour * 6, str: "6h"}
+	Interval8h  Interval = Interval{duration: time.Hour * 8, str: "8h"}
+	Interval12h Interval = Interval{duration: time.Hour * 12, str: "12h"}
+	Interval1d  Interval = Interval{duration: time.Hour * 24, str: "1d"}
+	Interval3d  Interval = Interval{duration: time.Hour * 24 * 3, str: "3d"}
+	Interval1w  Interval = Interval{duration: time.Hour * 24 * 7, str: "1w"}
 )
 
 type Kline struct {
@@ -76,7 +82,6 @@ type MarketService interface {
 	Ticker(ctx context.Context, tradingPair TradingPair) (decimal.Decimal, error)
 	GetKlines(ctx context.Context, req GetKlinesReq) ([]Kline, error)
 	SubscribeKline(ctx context.Context, tradingPair TradingPair, interval Interval) (chan Kline, error)
-	UnsubscribeKline(ctx context.Context, tradingPair TradingPair, interval Interval) error
 }
 
 type GetKlinesReq struct {
