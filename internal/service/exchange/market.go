@@ -46,7 +46,6 @@ func (i Interval) ToString() string {
 }
 
 const (
-	Interval3m  Interval = "3m"
 	Interval5m  Interval = "5m"
 	Interval15m Interval = "15m"
 	Interval30m Interval = "30m"
@@ -74,15 +73,18 @@ type Kline struct {
 }
 
 type MarketService interface {
-	GetKlines(ctx context.Context, req GetKlinesReq) ([]*Kline, error)
+	Ticker(ctx context.Context, tradingPair TradingPair) (decimal.Decimal, error)
+	GetKlines(ctx context.Context, req GetKlinesReq) ([]Kline, error)
+	SubscribeKline(ctx context.Context, tradingPair TradingPair, interval Interval) (chan Kline, error)
+	UnsubscribeKline(ctx context.Context, tradingPair TradingPair, interval Interval) error
 }
+
 type GetKlinesReq struct {
 	TradingPair        TradingPair
 	Interval           Interval
 	StartTime, EndTime time.Time
-	Limit              int
 }
 type SymbolService interface {
 	GetAllSymbols(ctx context.Context) ([]TradingPair, error)
-	GetSymbolPrice(ctx context.Context, symbol TradingPair) (TradingPair, error)
+	GetSymbolPrice(ctx context.Context, tradingPair TradingPair) (TradingPair, error)
 }

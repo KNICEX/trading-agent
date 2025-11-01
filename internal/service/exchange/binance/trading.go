@@ -329,21 +329,11 @@ func (s *TradingService) getEstimatedPrice(
 	}
 
 	// 如果没有价格（市价单），获取当前市价
-	// 注意：这里使用最新K线的收盘价作为预估价格
-	klines, err := s.marketSvc.GetKlines(ctx, exchange.GetKlinesReq{
-		TradingPair: pair,
-		Interval:    exchange.Interval1h,
-		Limit:       1,
-	})
+	price, err := s.marketSvc.Ticker(ctx, pair)
 	if err != nil {
 		return decimal.Zero, fmt.Errorf("get market price failed: %w", err)
 	}
-
-	if len(klines) == 0 {
-		return decimal.Zero, fmt.Errorf("no market data available")
-	}
-
-	return klines[0].Close, nil
+	return price, nil
 }
 
 // getCurrentLeverage 获取当前杠杆倍数

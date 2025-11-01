@@ -9,6 +9,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+var _ exchange.MarketService = (*MarketService)(nil)
+
 type MarketService struct {
 	cli *futures.Client
 }
@@ -18,8 +20,8 @@ func NewMarketService(cli *futures.Client) *MarketService {
 	return &MarketService{cli: cli}
 }
 
-func (m *MarketService) convertKlines(klines []*futures.Kline) []*exchange.Kline {
-	kls := make([]*exchange.Kline, len(klines))
+func (m *MarketService) convertKlines(klines []*futures.Kline) []exchange.Kline {
+	kls := make([]exchange.Kline, len(klines))
 	for i, k := range klines {
 		klineOpen, err := decimal.NewFromString(k.Open)
 		if err != nil {
@@ -45,7 +47,7 @@ func (m *MarketService) convertKlines(klines []*futures.Kline) []*exchange.Kline
 		if err != nil {
 			panic(err)
 		}
-		kls[i] = &exchange.Kline{
+		kls[i] = exchange.Kline{
 			OpenTime:         time.UnixMilli(k.OpenTime),
 			CloseTime:        time.UnixMilli(k.CloseTime),
 			Open:             klineOpen,
@@ -58,13 +60,10 @@ func (m *MarketService) convertKlines(klines []*futures.Kline) []*exchange.Kline
 	}
 	return kls
 }
-func (m *MarketService) GetKlines(ctx context.Context, req exchange.GetKlinesReq) ([]*exchange.Kline, error) {
+func (m *MarketService) GetKlines(ctx context.Context, req exchange.GetKlinesReq) ([]exchange.Kline, error) {
 	svc := m.cli.NewKlinesService().Symbol(req.TradingPair.ToString()) // 币安合约API使用 BTCUSDT 格式，不是 BTC/USDT
 	if req.Interval != "" {
 		svc.Interval(req.Interval.ToString())
-	}
-	if req.Limit != 0 {
-		svc.Limit(req.Limit)
 	}
 	if !req.StartTime.IsZero() {
 		svc.StartTime(req.StartTime.UnixMilli())
@@ -73,5 +72,26 @@ func (m *MarketService) GetKlines(ctx context.Context, req exchange.GetKlinesReq
 		svc.EndTime(req.EndTime.UnixMilli())
 	}
 	res, err := svc.Do(ctx)
-	return m.convertKlines(res), err
+	if err != nil {
+		return nil, err
+	}
+	return m.convertKlines(res), nil
+}
+
+func (m *MarketService) SubscribeKline(ctx context.Context, tradingPair exchange.TradingPair, interval exchange.Interval) (chan exchange.Kline, error) {
+	// TODO websocket subscribe kline
+	ch := make(chan exchange.Kline)
+	return ch, nil
+}
+
+func (m *MarketService) UnsubscribeKline(ctx context.Context, tradingPair exchange.TradingPair, interval exchange.Interval) error {
+	// TODO websocket unsubscribe kline
+	return nil
+}
+func (m *MarketService) Ticker(ctx context.Context, tradingPair exchange.TradingPair) (decimal.Decimal, error) {
+	prices, err := m.cli.NewListPricesService().Symbol(tradingPair.ToString()).Do(ctx)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	return decimal.NewFromString(prices[0].Price)
 }

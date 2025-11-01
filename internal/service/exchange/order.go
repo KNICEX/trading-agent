@@ -56,6 +56,7 @@ type CreateOrderReq struct {
 	// - OPEN + SHORT = SELL
 	// - CLOSE + LONG = SELL
 	// - CLOSE + SHORT = BUY
+	Timestamp time.Time
 }
 
 // modify req
