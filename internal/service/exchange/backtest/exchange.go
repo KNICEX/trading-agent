@@ -388,15 +388,48 @@ func (svc *BinanceExchangeService) triggerStopOrder(ctx context.Context, stopOrd
 	delete(svc.stopOrders, stopOrder.Id)
 	svc.orderMu.Unlock()
 
-	// 创建平仓订单
-	closeReq := exchange.ClosePositionReq{
-		TradingPair:  stopOrder.TradingPair,
-		PositionSide: stopOrder.PositionSide,
-		Price:        stopOrder.TriggerPrice, // 按触发价成交
-		Quantity:     stopOrder.Quantity,
-		CloseAll:     stopOrder.Quantity.IsZero(), // 数量为0表示全平
+	// 获取持仓
+	posKey := stopOrder.PositionKey
+	svc.positionMu.RLock()
+	position, exists := svc.positions[posKey]
+	svc.positionMu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("position not found: %s", posKey)
 	}
 
-	_, err := svc.ClosePosition(ctx, closeReq)
-	return err
+	// 计算平仓数量
+	quantity := stopOrder.Quantity
+	if quantity.IsZero() {
+		quantity = position.Quantity // 全平
+	}
+
+	// 创建一个虚拟订单信息（用于记录）
+	orderId := svc.generateOrderId()
+	now := svc.now()
+
+	order := &OrderInfo{
+		OrderInfo: exchange.OrderInfo{
+			Id:               orderId.ToString(),
+			TradingPair:      stopOrder.TradingPair,
+			Side:             stopOrder.Type, // BUY或SELL
+			Price:            stopOrder.TriggerPrice,
+			Quantity:         quantity,
+			ExecutedQuantity: quantity,
+			Status:           exchange.OrderStatusFilled, // 立即标记为已成交
+			CreatedAt:        now,
+			UpdatedAt:        now,
+			CompletedAt:      now,
+		},
+		OrderType:    exchange.OrderTypeClose,
+		PositionSide: stopOrder.PositionSide,
+	}
+
+	// 保存订单记录（用于历史查询）
+	svc.orderMu.Lock()
+	svc.orders[orderId] = order
+	svc.orderMu.Unlock()
+
+	// 🔑 直接执行平仓，不创建挂单
+	return svc.closePosition(posKey, order, stopOrder.TriggerPrice)
 }
