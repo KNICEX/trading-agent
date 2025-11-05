@@ -16,6 +16,40 @@ func (svc *BinanceExchangeService) CreateOrder(ctx context.Context, req exchange
 	// 计算订单方向
 	side := calculateOrderSide(req.OrderType, req.PositonSide)
 
+	// 计算需要冻结的资金（只有开仓订单需要冻结资金）
+	var frozenAmount decimal.Decimal
+	if req.OrderType == exchange.OrderTypeOpen {
+		// 获取订单价格（限价单用限价，市价单用当前价）
+		price := req.Price
+		if price.IsZero() {
+			// 市价单，使用当前市价估算
+			currentPrice, err := svc.Ticker(ctx, req.TradingPair)
+			if err != nil {
+				return "", fmt.Errorf("failed to get current price for market order: %w", err)
+			}
+			price = currentPrice
+		}
+
+		// 计算所需资金（价格 × 数量）
+		frozenAmount = price.Mul(req.Quantity)
+
+		// 检查可用余额
+		svc.accountMu.RLock()
+		availableBalance := svc.account.AvailableBalance
+		svc.accountMu.RUnlock()
+
+		if availableBalance.LessThan(frozenAmount) {
+			return "", fmt.Errorf("insufficient balance: available=%s, required=%s",
+				availableBalance, frozenAmount)
+		}
+
+		// 🔑 冻结资金
+		svc.accountMu.Lock()
+		svc.account.AvailableBalance = svc.account.AvailableBalance.Sub(frozenAmount)
+		svc.frozenFunds[orderId] = frozenAmount
+		svc.accountMu.Unlock()
+	}
+
 	// 创建订单记录（扩展版本）
 	order := &OrderInfo{
 		OrderInfo: exchange.OrderInfo{
@@ -97,10 +131,9 @@ func (svc *BinanceExchangeService) GetOrders(ctx context.Context, req exchange.G
 // CancelOrder 取消订单
 func (svc *BinanceExchangeService) CancelOrder(ctx context.Context, req exchange.CancelOrderReq) error {
 	svc.orderMu.Lock()
-	defer svc.orderMu.Unlock()
-
 	order, exists := svc.pendingOrders[req.Id]
 	if !exists {
+		svc.orderMu.Unlock()
 		return fmt.Errorf("order not found or already filled: %s", req.Id)
 	}
 
@@ -110,6 +143,17 @@ func (svc *BinanceExchangeService) CancelOrder(ctx context.Context, req exchange
 	// 更新订单状态为已取消
 	order.Status = exchange.OrderStatus("cancelled")
 	order.UpdatedAt = svc.now()
+	svc.orderMu.Unlock()
+
+	// 🔑 释放冻结的资金（如果有）
+	svc.accountMu.Lock()
+	frozenAmount, wasFrozen := svc.frozenFunds[req.Id]
+	if wasFrozen {
+		// 返还冻结资金到可用余额
+		svc.account.AvailableBalance = svc.account.AvailableBalance.Add(frozenAmount)
+		delete(svc.frozenFunds, req.Id)
+	}
+	svc.accountMu.Unlock()
 
 	return nil
 }
@@ -167,11 +211,26 @@ func (svc *BinanceExchangeService) openPosition(posKey string, order *OrderInfo,
 	// 计算所需保证金（假设杠杆为1）
 	cost := price.Mul(order.Quantity)
 
-	// 检查账户余额
-	if svc.account.AvailableBalance.LessThan(cost) {
-		return fmt.Errorf("insufficient balance: available=%s, required=%s",
-			svc.account.AvailableBalance, cost)
+	// 🔑 从冻结资金转为已用保证金
+	orderId := exchange.OrderId(order.Id)
+	svc.accountMu.Lock()
+	frozenAmount, wasFrozen := svc.frozenFunds[orderId]
+	if wasFrozen {
+		// 资金已冻结，直接转为已用保证金
+		delete(svc.frozenFunds, orderId)
+		svc.account.UsedMargin = svc.account.UsedMargin.Add(frozenAmount)
+	} else {
+		// 没有冻结资金（可能是止盈止损触发），检查可用余额
+		if svc.account.AvailableBalance.LessThan(cost) {
+			svc.accountMu.Unlock()
+			return fmt.Errorf("insufficient balance: available=%s, required=%s",
+				svc.account.AvailableBalance, cost)
+		}
+		// 从可用余额扣除
+		svc.account.AvailableBalance = svc.account.AvailableBalance.Sub(cost)
+		svc.account.UsedMargin = svc.account.UsedMargin.Add(cost)
 	}
+	svc.accountMu.Unlock()
 
 	position, exists := svc.positions[posKey]
 	now := svc.now()
@@ -205,12 +264,7 @@ func (svc *BinanceExchangeService) openPosition(posKey string, order *OrderInfo,
 		position.UpdatedAt = now
 	}
 
-	// 更新账户余额
-	svc.accountMu.Lock()
-	svc.account.AvailableBalance = svc.account.AvailableBalance.Sub(cost)
-	svc.account.UsedMargin = svc.account.UsedMargin.Add(cost)
-	svc.accountMu.Unlock()
-
+	// 账户余额已在上面更新（从冻结资金转为已用保证金）
 	return nil
 }
 

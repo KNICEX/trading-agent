@@ -46,6 +46,9 @@ type BinanceExchangeService struct {
 	// 当前市场价格（从K线更新）
 	priceMu       sync.RWMutex
 	currentPrices map[string]decimal.Decimal // key: tradingPair symbol
+
+	// 冻结资金（挂单占用）
+	frozenFunds map[exchange.OrderId]decimal.Decimal // 每个挂单冻结的资金
 }
 
 func NewBinanceExchangeService(cli *futures.Client, startTime, endTime time.Time, timeMultiplier int, initialBalance decimal.Decimal) *BinanceExchangeService {
@@ -71,6 +74,7 @@ func NewBinanceExchangeService(cli *futures.Client, startTime, endTime time.Time
 		},
 		positionHistories: []exchange.PositionHistory{},
 		currentPrices:     make(map[string]decimal.Decimal),
+		frozenFunds:       make(map[exchange.OrderId]decimal.Decimal),
 	}
 	svc.clockLoop()
 	return svc
