@@ -50,17 +50,24 @@
 - ✅ 空头止盈：价格 <= 止盈价时买入
 - ✅ 空头止损：价格 >= 止损价时买入
 
-### 4. 时钟系统
-内置时钟系统支持时间加速：
+### 4. 事件驱动架构
+✨ **新特性**：完全基于K线事件驱动，无需时钟
+- ✅ 每个交易对独立时间线
+- ✅ K线推送驱动订单扫描
+- ✅ 无定时器空转，性能更高
+- ✅ 多交易对完全并行
+
 ```go
-// 创建服务时设置时间倍速
+// 创建服务（无需时间倍速）
 svc := NewBinanceExchangeService(
     client, 
     startTime,   // 回测开始时间
     endTime,     // 回测结束时间
-    100,         // 时间倍速：100倍速
     decimal.NewFromInt(10000), // 初始资金
 )
+
+// SubscribeKline 会自动按顺序获取并推送K线
+// 每个交易对独立运行，互不干扰
 ```
 
 ### 5. 资金管理
@@ -75,6 +82,8 @@ svc := NewBinanceExchangeService(
 
 - [README.md](README.md) - 本文档（总体介绍）
 - [ORDER_SYSTEM.md](ORDER_SYSTEM.md) - **挂单与止盈止损详细文档**
+- [FUND_MANAGEMENT.md](FUND_MANAGEMENT.md) - **资金冻结机制详细文档**
+- [EVENT_DRIVEN.md](EVENT_DRIVEN.md) - **事件驱动架构说明** ✨新
 
 ## 使用示例
 
@@ -95,12 +104,11 @@ startTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 endTime := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
 
 // 创建回测交易所服务
-// 参数：客户端、开始时间、结束时间、时间倍速、初始资金
+// 参数：客户端、开始时间、结束时间、初始资金
 backtestSvc := backtest.NewBinanceExchangeService(
     client,
     startTime,
     endTime,
-    100, // 100倍速执行回测
     decimal.NewFromInt(10000), // 初始资金 10000 USDT
 )
 ```
@@ -340,9 +348,9 @@ PnL = (开仓价格 - 平仓价格) × 数量
 ### 💡 最佳实践
 
 1. **合理设置初始资金** - 根据策略需求设置
-2. **时间倍速** - 建议设置为 50-1000 倍
-3. **数据准备** - 确保回测时间范围内有足够的历史数据
-4. **风险控制** - 在策略中实现仓位管理和风险控制
+2. **数据准备** - 确保回测时间范围内有足够的历史数据
+3. **风险控制** - 在策略中实现仓位管理和风险控制
+4. **多交易对** - 每个交易对独立订阅，完全并行执行
 
 ## TODO
 

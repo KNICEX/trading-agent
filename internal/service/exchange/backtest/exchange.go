@@ -21,11 +21,9 @@ type BinanceExchangeService struct {
 	startTime time.Time
 	endTime   time.Time
 
-	clockMu sync.RWMutex
-	clock   time.Time
-
-	clockUpdateCallbacks []func(t time.Time)
-	timeMultiplier       int
+	// 每个交易对的当前时间（从K线更新）
+	timeMu       sync.RWMutex
+	currentTimes map[string]time.Time // key: tradingPair symbol
 
 	// 模拟交易状态
 	orderMu       sync.RWMutex
@@ -51,14 +49,11 @@ type BinanceExchangeService struct {
 	frozenFunds map[exchange.OrderId]decimal.Decimal // 每个挂单冻结的资金
 }
 
-func NewBinanceExchangeService(cli *futures.Client, startTime, endTime time.Time, timeMultiplier int, initialBalance decimal.Decimal) *BinanceExchangeService {
-	svc := &BinanceExchangeService{
-		cli:                  cli,
-		startTime:            startTime,
-		endTime:              endTime,
-		timeMultiplier:       timeMultiplier,
-		clock:                startTime,
-		clockUpdateCallbacks: []func(t time.Time){},
+func NewBinanceExchangeService(cli *futures.Client, startTime, endTime time.Time, initialBalance decimal.Decimal) *BinanceExchangeService {
+	return &BinanceExchangeService{
+		cli:       cli,
+		startTime: startTime,
+		endTime:   endTime,
 
 		// 初始化模拟交易状态
 		orders:        make(map[exchange.OrderId]*OrderInfo),
@@ -74,42 +69,27 @@ func NewBinanceExchangeService(cli *futures.Client, startTime, endTime time.Time
 		},
 		positionHistories: []exchange.PositionHistory{},
 		currentPrices:     make(map[string]decimal.Decimal),
+		currentTimes:      make(map[string]time.Time),
 		frozenFunds:       make(map[exchange.OrderId]decimal.Decimal),
 	}
-	svc.clockLoop()
-	return svc
 }
 
-func (svc *BinanceExchangeService) now() time.Time {
-	svc.clockMu.RLock()
-	defer svc.clockMu.RUnlock()
-	return svc.clock
+// now 返回指定交易对的当前时间（从K线更新）
+func (svc *BinanceExchangeService) now(tradingPair exchange.TradingPair) time.Time {
+	svc.timeMu.RLock()
+	defer svc.timeMu.RUnlock()
+
+	if t, exists := svc.currentTimes[tradingPair.ToString()]; exists {
+		return t
+	}
+	return svc.startTime
 }
 
-func (svc *BinanceExchangeService) updateClock(t time.Time) {
-	svc.clockMu.Lock()
-	defer svc.clockMu.Unlock()
-	svc.clock = t
-	go func() {
-		for _, callback := range svc.clockUpdateCallbacks {
-			callback(t)
-		}
-	}()
-}
-
-func (svc *BinanceExchangeService) onClockUpdate(callback func(t time.Time)) {
-	svc.clockUpdateCallbacks = append(svc.clockUpdateCallbacks, callback)
-}
-
-// clockLoop 定时更新clock
-func (svc *BinanceExchangeService) clockLoop() {
-	startTime := svc.startTime
-	go func() {
-		baseInterval := time.Millisecond * 100
-		for range time.Tick(baseInterval) {
-			svc.updateClock(startTime.Add(baseInterval * time.Duration(svc.timeMultiplier)))
-		}
-	}()
+// updateTime 更新交易对的当前时间
+func (svc *BinanceExchangeService) updateTime(tradingPair exchange.TradingPair, t time.Time) {
+	svc.timeMu.Lock()
+	defer svc.timeMu.Unlock()
+	svc.currentTimes[tradingPair.ToString()] = t
 }
 
 func (svc *BinanceExchangeService) Ticker(ctx context.Context, tradingPair exchange.TradingPair) (decimal.Decimal, error) {
@@ -134,43 +114,68 @@ func (svc *BinanceExchangeService) updatePrice(tradingPair exchange.TradingPair,
 func (svc *BinanceExchangeService) SubscribeKline(ctx context.Context, tradingPair exchange.TradingPair, interval exchange.Interval) (chan exchange.Kline, error) {
 	ch := make(chan exchange.Kline, 10)
 
-	svc.onClockUpdate(func(t time.Time) {
+	// 🔑 事件驱动：启动协程按顺序获取并推送K线
+	go func() {
+		defer close(ch)
 
-		if t.Unix()%int64(interval.Duration().Seconds()) > 10 {
-			// 误差大于10秒，跳过
-			return
+		// 从开始时间按K线周期遍历到结束时间
+		currentTime := svc.startTime.Truncate(interval.Duration())
+
+		for currentTime.Before(svc.endTime) {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			// 计算当前K线的时间范围
+			openTime := currentTime
+			closeTime := currentTime.Add(interval.Duration())
+
+			// 获取K线数据
+			klines, err := svc.GetKlines(ctx, exchange.GetKlinesReq{
+				TradingPair: tradingPair,
+				Interval:    interval,
+				StartTime:   openTime,
+				EndTime:     closeTime,
+			})
+
+			if err != nil {
+				fmt.Printf("get klines error for %s: %v\n", tradingPair.ToString(), err)
+				currentTime = closeTime
+				continue
+			}
+
+			if len(klines) == 0 {
+				// 没有K线数据，跳到下一个周期
+				currentTime = closeTime
+				continue
+			}
+
+			kline := klines[0]
+
+			// 更新当前价格为K线收盘价（用于市价单成交）
+			svc.updatePrice(tradingPair, kline.Close)
+
+			// 更新该交易对的当前时间
+			svc.updateTime(tradingPair, kline.CloseTime)
+
+			// 🔑 关键：在推送K线前扫描所有订单
+			// 检查挂单是否成交，检查止盈止损是否触发
+			svc.scanOrders(ctx, tradingPair, kline)
+
+			// 推送K线
+			select {
+			case ch <- kline:
+			case <-ctx.Done():
+				return
+			}
+
+			// 移动到下一个K线周期
+			currentTime = closeTime
 		}
+	}()
 
-		closeTime := t.Truncate(interval.Duration())
-		openTime := closeTime.Add(-interval.Duration())
-
-		klines, err := svc.GetKlines(ctx, exchange.GetKlinesReq{
-			TradingPair: tradingPair,
-			Interval:    interval,
-			StartTime:   openTime,
-			EndTime:     closeTime,
-		})
-		if err != nil {
-			fmt.Println("get klines error", err)
-			return
-		}
-		if len(klines) == 0 {
-			fmt.Println("no klines found for ", openTime, " to ", closeTime)
-			return
-		}
-
-		kline := klines[0]
-
-		// 更新当前价格为K线收盘价（用于市价单成交）
-		svc.updatePrice(tradingPair, kline.Close)
-
-		// 🔑 关键：在推送K线前扫描所有订单
-		// 检查挂单是否成交，检查止盈止损是否触发
-		svc.scanOrders(ctx, tradingPair, kline)
-
-		// 推送K线
-		ch <- kline
-	})
 	return ch, nil
 }
 
@@ -312,7 +317,7 @@ func (svc *BinanceExchangeService) fillOrder(ctx context.Context, order *OrderIn
 	// 更新订单状态为已成交
 	order.Status = exchange.OrderStatusFilled
 	order.ExecutedQuantity = order.Quantity
-	now := svc.now()
+	now := svc.now(order.OrderInfo.TradingPair)
 	order.UpdatedAt = now
 	order.CompletedAt = now
 
@@ -410,7 +415,7 @@ func (svc *BinanceExchangeService) triggerStopOrder(ctx context.Context, stopOrd
 
 	// 创建一个虚拟订单信息（用于记录）
 	orderId := svc.generateOrderId()
-	now := svc.now()
+	now := svc.now(stopOrder.TradingPair)
 
 	order := &OrderInfo{
 		OrderInfo: exchange.OrderInfo{

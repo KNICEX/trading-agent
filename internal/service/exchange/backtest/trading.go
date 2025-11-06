@@ -42,7 +42,7 @@ func (svc *BinanceExchangeService) OpenPosition(ctx context.Context, req exchang
 		PositonSide: req.PositionSide,
 		Price:       req.Price,
 		Quantity:    quantity,
-		Timestamp:   svc.now(),
+		Timestamp:   svc.now(req.TradingPair),
 	}
 
 	orderId, err := svc.CreateOrder(ctx, orderReq)
@@ -108,7 +108,7 @@ func (svc *BinanceExchangeService) ClosePosition(ctx context.Context, req exchan
 		PositonSide: req.PositionSide,
 		Price:       req.Price,
 		Quantity:    quantity,
-		Timestamp:   svc.now(),
+		Timestamp:   svc.now(req.TradingPair),
 	}
 
 	return svc.CreateOrder(ctx, orderReq)

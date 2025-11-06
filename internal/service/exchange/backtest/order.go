@@ -11,7 +11,7 @@ import (
 // CreateOrder 创建订单（回测模式：创建挂单，等待K线触发成交）
 func (svc *BinanceExchangeService) CreateOrder(ctx context.Context, req exchange.CreateOrderReq) (exchange.OrderId, error) {
 	orderId := svc.generateOrderId()
-	now := svc.now()
+	now := svc.now(req.TradingPair)
 
 	// 计算订单方向
 	side := calculateOrderSide(req.OrderType, req.PositonSide)
@@ -142,7 +142,7 @@ func (svc *BinanceExchangeService) CancelOrder(ctx context.Context, req exchange
 
 	// 更新订单状态为已取消
 	order.Status = exchange.OrderStatus("cancelled")
-	order.UpdatedAt = svc.now()
+	order.UpdatedAt = svc.now(order.OrderInfo.TradingPair)
 	svc.orderMu.Unlock()
 
 	// 🔑 释放冻结的资金（如果有）
@@ -233,7 +233,7 @@ func (svc *BinanceExchangeService) openPosition(posKey string, order *OrderInfo,
 	svc.accountMu.Unlock()
 
 	position, exists := svc.positions[posKey]
-	now := svc.now()
+	now := svc.now(order.OrderInfo.TradingPair)
 
 	if !exists {
 		// 创建新仓位
@@ -306,7 +306,7 @@ func (svc *BinanceExchangeService) closePosition(posKey string, order *OrderInfo
 	// 更新或关闭仓位
 	position.Quantity = position.Quantity.Sub(order.Quantity)
 	position.MarginAmount = position.MarginAmount.Sub(releasedMargin)
-	position.UpdatedAt = svc.now()
+	position.UpdatedAt = svc.now(order.OrderInfo.TradingPair)
 
 	if position.Quantity.IsZero() {
 		// 完全平仓，删除仓位
