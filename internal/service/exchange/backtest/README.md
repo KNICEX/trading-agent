@@ -50,12 +50,13 @@
 - ✅ 空头止盈：价格 <= 止盈价时买入
 - ✅ 空头止损：价格 >= 止损价时买入
 
-### 4. 事件驱动架构
+### 4. 事件驱动架构与性能优化
 ✨ **新特性**：完全基于K线事件驱动，无需时钟
 - ✅ 每个交易对独立时间线
 - ✅ K线推送驱动订单扫描
 - ✅ 无定时器空转，性能更高
 - ✅ 多交易对完全并行
+- 🚀 **性能优化**：分批加载K线（每批200根），大幅减少API请求（99%+）
 
 ```go
 // 创建服务（无需时间倍速）
@@ -70,11 +71,13 @@ svc := NewBinanceExchangeService(
 // 每个交易对独立运行，互不干扰
 ```
 
-### 5. 资金管理
+### 5. 资金管理与杠杆
 - 初始资金在创建服务时设置
 - 自动计算和更新账户余额
 - 跟踪已用保证金和可用余额
 - 计算盈亏并实时更新账户
+- ✨ **支持1-125倍杠杆**，每个交易对独立配置
+- 保证金计算：价格 × 数量 ÷ 杠杆
 
 ## 快速开始
 
@@ -82,8 +85,9 @@ svc := NewBinanceExchangeService(
 
 - [README.md](README.md) - 本文档（总体介绍）
 - [ORDER_SYSTEM.md](ORDER_SYSTEM.md) - **挂单与止盈止损详细文档**
-- [FUND_MANAGEMENT.md](FUND_MANAGEMENT.md) - **资金冻结机制详细文档**
-- [EVENT_DRIVEN.md](EVENT_DRIVEN.md) - **事件驱动架构说明** ✨新
+- [KLINE_PROVIDER.md](KLINE_PROVIDER.md) - **K线数据提供者架构** ✨新
+- [CHANGELOG.md](CHANGELOG.md) - **最新改进日志**
+- [integration/README.md](integration/README.md) - **集成测试文档**
 
 ## 使用示例
 
@@ -339,7 +343,7 @@ PnL = (开仓价格 - 平仓价格) × 数量
 ### ⚠️ 限制
 
 1. **K线级别精度** - 基于K线的高低价判断成交，无法模拟tick级别
-2. **固定杠杆** - 当前固定为1倍杠杆
+2. **杠杆** - ✅ 已支持1-125倍杠杆，但未实现强平机制
 3. **无滑点模拟** - 按限价或K线收盘价精确成交
 4. **无手续费** - 暂未实现手续费计算
 5. **部分成交** - 暂不支持部分成交
@@ -352,12 +356,85 @@ PnL = (开仓价格 - 平仓价格) × 数量
 3. **风险控制** - 在策略中实现仓位管理和风险控制
 4. **多交易对** - 每个交易对独立订阅，完全并行执行
 
+## 数据源配置
+
+### 使用真实API数据（默认）
+
+```go
+client := futures.NewClient(apiKey, secretKey)
+svc := backtest.NewBinanceExchangeService(
+    client,
+    startTime,
+    endTime,
+    decimal.NewFromInt(10000),
+)
+// 自动使用币安API获取K线数据
+```
+
+### 使用模拟数据（测试）
+
+```go
+// 创建模拟K线提供者
+mockProvider := backtest.NewMockKlineProvider()
+
+// 生成上涨趋势数据
+mockProvider.GenerateKlines(
+    btcPair,
+    exchange.Interval5m,
+    startTime,
+    50000,  // 基础价格
+    288,    // K线数量（1天）
+    "up",   // 上涨趋势
+)
+
+// 使用模拟数据创建回测服务
+svc := backtest.NewBinanceExchangeServiceWithProvider(
+    nil,  // 不需要真实客户端
+    startTime,
+    endTime,
+    decimal.NewFromInt(10000),
+    mockProvider,
+)
+```
+
+详见：[KLINE_PROVIDER.md](KLINE_PROVIDER.md)
+
+## 测试
+
+### 单元测试（使用模拟数据）
+
+```bash
+cd internal/service/exchange/backtest
+go test -v
+```
+
+### 集成测试（使用真实API）
+
+```bash
+cd internal/service/exchange/backtest/integration
+
+# 运行所有测试
+make test
+
+# 运行特定测试
+make test-account    # 账户功能
+make test-position   # 持仓管理
+make test-leverage   # 杠杆功能
+
+# 查看帮助
+make help
+```
+
+详见：[integration/README.md](integration/README.md)
+
 ## TODO
 
 - [ ] 实现手续费计算
 - [ ] 添加滑点模拟
-- [ ] 支持多级杠杆设置
-- [ ] 完整的止盈止损实现
+- [x] ~~支持多级杠杆设置~~ ✅ 已完成
+- [x] ~~完整的止盈止损实现~~ ✅ 已完成
+- [x] ~~集成测试~~ ✅ 已完成
+- [ ] 实现强制平仓机制（爆仓检测）
 - [ ] 订单部分成交模拟
 - [ ] 性能优化和并发安全测试
 

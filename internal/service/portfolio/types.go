@@ -14,13 +14,13 @@ type RiskConfig struct {
 	MaxStopLossRatio float64
 
 	// 最大止损金额
-	MaxStopLossAmount float64
+	// MaxStopLossAmount float64
 
 	// 全仓最大杠杆
 	MaxLeverage int
 
 	// 单仓位最大总资金比例(杠杆前)
-	MaxPositionRatio float64
+	// MaxPositionRatio float64
 
 	// 最小盈亏比(仅限 止盈止损订单有效， 跟踪止盈无效)
 	MinProfitLossRatio float64

@@ -11,7 +11,7 @@ import (
 // ============ TradingService 实现 ============
 
 // OpenPosition 开仓/加仓
-func (svc *BinanceExchangeService) OpenPosition(ctx context.Context, req exchange.OpenPositionReq) (*exchange.OpenPositionResp, error) {
+func (svc *ExchangeService) OpenPosition(ctx context.Context, req exchange.OpenPositionReq) (*exchange.OpenPositionResp, error) {
 	// 计算开仓数量
 	quantity := req.Quantity
 	if !req.BalancePercent.IsZero() {
@@ -63,25 +63,35 @@ func (svc *BinanceExchangeService) OpenPosition(ctx context.Context, req exchang
 		EstimatedPrice: price,
 	}
 
-	// 处理止盈止损订单
+	// 🔑 保存止盈止损订单到待处理列表（等待开仓订单成交后再设置）
 	if req.TakeProfit.IsValid() || req.StopLoss.IsValid() {
-		stopResp, err := svc.SetStopOrders(ctx, exchange.SetStopOrdersReq{
+		pendingStop := &PendingStopOrders{
 			TradingPair:  req.TradingPair,
 			PositionSide: req.PositionSide,
 			TakeProfit:   req.TakeProfit,
 			StopLoss:     req.StopLoss,
-		})
-		if err == nil {
-			resp.TakeProfitId = stopResp.TakeProfitId
-			resp.StopLossId = stopResp.StopLossId
 		}
+
+		// 预分配止盈止损订单ID（用于返回给调用方）
+		if req.TakeProfit.IsValid() {
+			pendingStop.TakeProfitId = svc.generateOrderId()
+			resp.TakeProfitId = pendingStop.TakeProfitId
+		}
+		if req.StopLoss.IsValid() {
+			pendingStop.StopLossId = svc.generateOrderId()
+			resp.StopLossId = pendingStop.StopLossId
+		}
+
+		svc.orderMu.Lock()
+		svc.pendingStopOrders[orderId] = pendingStop
+		svc.orderMu.Unlock()
 	}
 
 	return resp, nil
 }
 
 // ClosePosition 平仓
-func (svc *BinanceExchangeService) ClosePosition(ctx context.Context, req exchange.ClosePositionReq) (exchange.OrderId, error) {
+func (svc *ExchangeService) ClosePosition(ctx context.Context, req exchange.ClosePositionReq) (exchange.OrderId, error) {
 	// 获取当前持仓
 	posKey := svc.getPositionKey(req.TradingPair, req.PositionSide)
 
@@ -115,17 +125,27 @@ func (svc *BinanceExchangeService) ClosePosition(ctx context.Context, req exchan
 }
 
 // SetStopOrders 设置止盈止损订单
-func (svc *BinanceExchangeService) SetStopOrders(ctx context.Context, req exchange.SetStopOrdersReq) (*exchange.SetStopOrdersResp, error) {
+func (svc *ExchangeService) SetStopOrders(ctx context.Context, req exchange.SetStopOrdersReq) (*exchange.SetStopOrdersResp, error) {
 	resp := &exchange.SetStopOrdersResp{}
 	posKey := svc.getPositionKey(req.TradingPair, req.PositionSide)
 
 	// 检查持仓是否存在
 	svc.positionMu.RLock()
-	_, exists := svc.positions[posKey]
+	position, exists := svc.positions[posKey]
 	svc.positionMu.RUnlock()
 
 	if !exists {
 		return nil, fmt.Errorf("position not found: %s", posKey)
+	}
+
+	svc.orderMu.Lock()
+	defer svc.orderMu.Unlock()
+
+	// 🔑 先取消该持仓的旧止盈止损订单（防止重复）
+	for id, stopOrder := range svc.stopOrders {
+		if stopOrder.PositionKey == posKey {
+			delete(svc.stopOrders, id)
+		}
 	}
 
 	// 创建止盈订单
@@ -135,16 +155,14 @@ func (svc *BinanceExchangeService) SetStopOrders(ctx context.Context, req exchan
 			Id:           takeProfitId,
 			TradingPair:  req.TradingPair,
 			PositionSide: req.PositionSide,
-			Type:         req.PositionSide.GetCloseOrderSide(), // 多头用卖，空头用买
+			StopType:     StopOrderTypeTakeProfit,
+			OrderSide:    req.PositionSide.GetCloseOrderSide(), // 多头用卖，空头用买
 			TriggerPrice: req.TakeProfit.Price,
-			Quantity:     decimal.Zero, // 0表示全平
+			Quantity:     position.Quantity, // 使用当前持仓数量（避免过度平仓）
 			PositionKey:  posKey,
 		}
 
-		svc.orderMu.Lock()
 		svc.stopOrders[takeProfitId] = stopOrder
-		svc.orderMu.Unlock()
-
 		resp.TakeProfitId = takeProfitId
 	}
 
@@ -155,16 +173,14 @@ func (svc *BinanceExchangeService) SetStopOrders(ctx context.Context, req exchan
 			Id:           stopLossId,
 			TradingPair:  req.TradingPair,
 			PositionSide: req.PositionSide,
-			Type:         req.PositionSide.GetCloseOrderSide(),
+			StopType:     StopOrderTypeStopLoss,
+			OrderSide:    req.PositionSide.GetCloseOrderSide(),
 			TriggerPrice: req.StopLoss.Price,
-			Quantity:     decimal.Zero, // 0表示全平
+			Quantity:     position.Quantity, // 使用当前持仓数量（避免过度平仓）
 			PositionKey:  posKey,
 		}
 
-		svc.orderMu.Lock()
 		svc.stopOrders[stopLossId] = stopOrder
-		svc.orderMu.Unlock()
-
 		resp.StopLossId = stopLossId
 	}
 

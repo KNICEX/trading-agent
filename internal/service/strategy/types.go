@@ -15,6 +15,10 @@ type Strategy interface {
 
 	TradingPair() exchange.TradingPair
 
+	// Interval 策略运行的K线周期
+	// 外部应该根据这个周期订阅K线数据来驱动策略
+	Interval() exchange.Interval
+
 	// Initialize 初始化策略
 	// 在策略启动时调用，可以加载历史数据、初始化指标等
 	Initialize(ctx context.Context, strategyCtx Context) error
