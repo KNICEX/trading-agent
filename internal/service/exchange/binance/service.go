@@ -20,12 +20,20 @@ func NewService(cli *futures.Client) *Service {
 	accountSvc := NewAccountService(cli)
 	positionSvc := NewPositionService(cli)
 	marketSvc := NewMarketService(cli)
+
+	// 使用通用的 TradingService
+	precisionProvider := NewPrecisionProvider()
+	tradingSvc := exchange.NewTradingService(
+		NewService(cli),
+		precisionProvider,
+	)
+
 	return &Service{
 		marketSvc:   marketSvc,
 		positionSvc: positionSvc,
 		orderSvc:    orderSvc,
 		accountSvc:  accountSvc,
-		tradingSvc:  NewTradingService(cli, orderSvc, accountSvc, positionSvc, marketSvc),
+		tradingSvc:  tradingSvc,
 	}
 }
 

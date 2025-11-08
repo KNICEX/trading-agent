@@ -8,6 +8,7 @@ import (
 
 	"github.com/KNICEX/trading-agent/internal/service/analytics"
 	"github.com/KNICEX/trading-agent/internal/service/exchange"
+	"github.com/KNICEX/trading-agent/internal/service/exchange/backtest"
 	"github.com/KNICEX/trading-agent/internal/service/portfolio"
 	"github.com/KNICEX/trading-agent/internal/service/strategy"
 )
@@ -77,7 +78,7 @@ func NewBacktestEngine(startTime, endTime time.Time, exchangeSvc exchange.Servic
 		startTime:   startTime,
 		endTime:     endTime,
 		executor: &Executor{
-			tradingSvc:  exchangeSvc.TradingService(),
+			tradingSvc:  exchange.NewTradingService(exchangeSvc, &backtest.PercisionProvider{}),
 			orderSvc:    exchangeSvc.OrderService(),
 			positionSvc: exchangeSvc.PositionService(),
 		},

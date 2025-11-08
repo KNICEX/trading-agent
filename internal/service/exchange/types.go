@@ -5,5 +5,4 @@ type Service interface {
 	PositionService() PositionService
 	AccountService() AccountService
 	OrderService() OrderService
-	TradingService() TradingService
 }

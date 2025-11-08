@@ -58,12 +58,12 @@ func (s *BaseSuite) SetupSuite() {
 	s.positionSvc = binance.NewPositionService(s.client)
 	s.accountSvc = binance.NewAccountService(s.client)
 	s.marketSvc = binance.NewMarketService(s.client)
-	s.tradingSvc = binance.NewTradingService(
-		s.client,
-		s.orderSvc,
-		s.accountSvc,
-		s.positionSvc,
-		s.marketSvc,
+
+	// 使用通用的 TradingService
+	precisionProvider := binance.NewPrecisionProvider()
+	s.tradingSvc = exchange.NewTradingService(
+		binance.NewService(s.client),
+		precisionProvider,
 	)
 
 	// 设置测试交易对和上下文
