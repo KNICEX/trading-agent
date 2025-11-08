@@ -583,12 +583,13 @@ func TestExchangeService_StopLoss(t *testing.T) {
 
 	// 设置止损（价格下跌2%触发）
 	stopLossPrice := entryPrice.Mul(decimal.NewFromFloat(0.98))
-	_, err = svc.SetStopOrders(ctx, exchange.SetStopOrdersReq{
-		TradingPair:  pair,
-		PositionSide: exchange.PositionSideLong,
-		StopLoss: exchange.StopOrder{
-			Price: stopLossPrice,
-		},
+	_, err = svc.CreateOrder(ctx, exchange.CreateOrderReq{
+		TradingPair: pair,
+		OrderType:   exchange.OrderTypeClose,
+		PositonSide: exchange.PositionSideLong,
+		Price:       stopLossPrice,
+		Quantity:    decimal.NewFromFloat(0.1),
+		Timestamp:   time.Now(),
 	})
 	require.NoError(t, err)
 
@@ -678,12 +679,13 @@ func TestExchangeService_TakeProfit(t *testing.T) {
 
 	// 设置止盈（价格上涨2%触发）
 	takeProfitPrice := entryPrice.Mul(decimal.NewFromFloat(1.02))
-	_, err = svc.SetStopOrders(ctx, exchange.SetStopOrdersReq{
-		TradingPair:  pair,
-		PositionSide: exchange.PositionSideLong,
-		TakeProfit: exchange.StopOrder{
-			Price: takeProfitPrice,
-		},
+	_, err = svc.CreateOrder(ctx, exchange.CreateOrderReq{
+		TradingPair: pair,
+		OrderType:   exchange.OrderTypeClose,
+		PositonSide: exchange.PositionSideLong,
+		Price:       takeProfitPrice,
+		Quantity:    decimal.NewFromFloat(0.1),
+		Timestamp:   time.Now(),
 	})
 	require.NoError(t, err)
 

@@ -304,7 +304,7 @@ func TestOrderService_OrderFillPrice(t *testing.T) {
 func TestOrderService_OrderScanMechanism(t *testing.T) {
 	startTime := time.Now()
 	endTime := startTime.Add(24 * time.Hour)
-	initialBalance := 10000.0
+	initialBalance := 20000.0 // 增加初始余额以支持两个订单
 
 	svc, provider := createTestExchange(t, initialBalance, startTime, endTime)
 
@@ -349,7 +349,7 @@ func TestOrderService_OrderScanMechanism(t *testing.T) {
 	<-klineChan // 第一根K线
 
 	// 创建买单（限价49950），应该在第二根K线成交（最低价49950）
-	buyOrderId, _ := svc.CreateOrder(ctx, exchange.CreateOrderReq{
+	buyOrderId, err := svc.CreateOrder(ctx, exchange.CreateOrderReq{
 		TradingPair: pair,
 		OrderType:   exchange.OrderTypeOpen,
 		PositonSide: exchange.PositionSideLong,
@@ -357,9 +357,10 @@ func TestOrderService_OrderScanMechanism(t *testing.T) {
 		Quantity:    decimal.NewFromFloat(0.1),
 		Timestamp:   time.Now(),
 	})
+	require.NoError(t, err, "创建买单应该成功")
 
 	// 创建卖单（限价50150），应该在第二根K线成交（最高价50150）
-	sellOrderId, _ := svc.CreateOrder(ctx, exchange.CreateOrderReq{
+	sellOrderId, err := svc.CreateOrder(ctx, exchange.CreateOrderReq{
 		TradingPair: pair,
 		OrderType:   exchange.OrderTypeOpen,
 		PositonSide: exchange.PositionSideShort,
@@ -367,6 +368,7 @@ func TestOrderService_OrderScanMechanism(t *testing.T) {
 		Quantity:    decimal.NewFromFloat(0.1),
 		Timestamp:   time.Now(),
 	})
+	require.NoError(t, err, "创建卖单应该成功")
 
 	// 第一根K线后，订单应该还在挂单
 	orders, _ := svc.GetOrders(ctx, exchange.GetOrdersReq{TradingPair: pair})
@@ -452,7 +454,7 @@ func TestOrderService_FrozenFunds(t *testing.T) {
 func TestOrderService_FrozenPosition(t *testing.T) {
 	startTime := time.Now()
 	endTime := startTime.Add(24 * time.Hour)
-	initialBalance := 10000.0
+	initialBalance := 15000.0 // 增加初始余额以应对市价单价格波动
 
 	svc, provider := createTestExchange(t, initialBalance, startTime, endTime)
 
@@ -517,4 +519,224 @@ func TestOrderService_FrozenPosition(t *testing.T) {
 		Timestamp:   time.Now(),
 	})
 	require.NoError(t, err, "取消订单后应该可以创建新订单")
+}
+
+// TestOrderService_PartialFill 测试部分成交机制
+// 当成交价格比冻结时更差，且余额不足时，应该部分成交
+func TestOrderService_PartialFill(t *testing.T) {
+	startTime := time.Now()
+	endTime := startTime.Add(24 * time.Hour)
+	initialBalance := 10000.0 // 初始余额10000
+
+	svc, provider := createTestExchange(t, initialBalance, startTime, endTime)
+
+	pair := exchange.TradingPair{Base: "BTC", Quote: "USDT"}
+	interval := exchange.Interval5m
+
+	// 创建K线数据：第一根50000，第二根价格大幅上涨到52000
+	klines := []exchange.Kline{
+		{
+			OpenTime:  startTime,
+			CloseTime: startTime.Add(interval.Duration()),
+			Open:      decimal.NewFromFloat(50000),
+			Close:     decimal.NewFromFloat(50000),
+			High:      decimal.NewFromFloat(50100),
+			Low:       decimal.NewFromFloat(49900),
+			Volume:    decimal.NewFromFloat(1000),
+		},
+		{
+			OpenTime:  startTime.Add(interval.Duration()),
+			CloseTime: startTime.Add(2 * interval.Duration()),
+			Open:      decimal.NewFromFloat(52000), // 开盘价大幅上涨
+			Close:     decimal.NewFromFloat(52000),
+			High:      decimal.NewFromFloat(52100),
+			Low:       decimal.NewFromFloat(51900),
+			Volume:    decimal.NewFromFloat(1000),
+		},
+	}
+	provider.AddKlines(pair, interval, klines)
+
+	ctx := context.Background()
+
+	klineChan, _ := svc.SubscribeKline(ctx, pair, interval)
+	<-klineChan // 第一根K线
+
+	// 创建市价单：买入0.2个BTC
+	// 冻结金额 = 50000 × 0.2 = 10000 USDT（刚好用完全部余额）
+	orderId, err := svc.CreateOrder(ctx, exchange.CreateOrderReq{
+		TradingPair: pair,
+		OrderType:   exchange.OrderTypeOpen,
+		PositonSide: exchange.PositionSideLong,
+		Price:       decimal.Zero, // 市价单
+		Quantity:    decimal.NewFromFloat(0.2),
+		Timestamp:   time.Now(),
+	})
+	require.NoError(t, err)
+
+	// 检查余额被冻结
+	accountAfterCreate, _ := svc.GetAccountInfo(ctx)
+	assert.True(t, accountAfterCreate.AvailableBalance.IsZero(),
+		"创建订单后可用余额应该为0（全部冻结）")
+
+	<-klineChan // 第二根K线，价格上涨到52000，订单成交
+
+	// 检查订单状态：应该部分成交
+	order, _ := svc.GetOrder(ctx, exchange.GetOrderReq{Id: orderId})
+	t.Logf("订单状态: %s", order.Status)
+	t.Logf("订单数量: %s", order.Quantity)
+	t.Logf("成交数量: %s", order.ExecutedQuantity)
+
+	// 断言：应该部分成交
+	assert.Equal(t, exchange.OrderStatusPartiallyFilled, order.Status,
+		"由于价格上涨且余额不足，应该部分成交")
+	assert.True(t, order.ExecutedQuantity.LessThan(order.Quantity),
+		"成交数量应该小于订单数量")
+	assert.True(t, order.ExecutedQuantity.GreaterThan(decimal.Zero),
+		"成交数量应该大于0")
+
+	// 检查持仓
+	positions, _ := svc.GetActivePositions(ctx, []exchange.TradingPair{pair})
+	require.Len(t, positions, 1)
+	assert.Equal(t, order.ExecutedQuantity, positions[0].Quantity,
+		"持仓数量应该等于实际成交数量")
+
+	// 检查账户：可用余额应该为0（全部用完），保证金应该等于冻结的10000
+	accountAfterFill, _ := svc.GetAccountInfo(ctx)
+	assert.True(t, accountAfterFill.AvailableBalance.IsZero(),
+		"成交后可用余额应该为0（全部用作保证金）")
+	assert.True(t, accountAfterFill.UsedMargin.Equal(decimal.NewFromFloat(10000)),
+		"保证金应该等于冻结的全部资金10000")
+
+	t.Logf("预期成交数量: 0.2 BTC")
+	t.Logf("实际成交数量: %s BTC", order.ExecutedQuantity)
+	t.Logf("成交价格: 52000 (vs 冻结时估算: 50000)")
+	t.Logf("理论最大数量: 10000 / 52000 = %s BTC",
+		decimal.NewFromFloat(10000).Div(decimal.NewFromFloat(52000)))
+}
+
+// TestOrderService_CancelOrderLogic 测试取消订单的逻辑
+func TestOrderService_CancelOrderLogic(t *testing.T) {
+	startTime := time.Now()
+	endTime := startTime.Add(24 * time.Hour)
+	initialBalance := 50000.0
+
+	svc, provider := createTestExchange(t, initialBalance, startTime, endTime)
+
+	pair1 := exchange.TradingPair{Base: "BTC", Quote: "USDT"}
+	pair2 := exchange.TradingPair{Base: "ETH", Quote: "USDT"}
+	interval := exchange.Interval5m
+
+	provider.GenerateKlines(pair1, interval, startTime, 50000.0, 5, "flat")
+	provider.GenerateKlines(pair2, interval, startTime, 3000.0, 5, "flat")
+
+	ctx := context.Background()
+
+	klineChan1, _ := svc.SubscribeKline(ctx, pair1, interval)
+	klineChan2, _ := svc.SubscribeKline(ctx, pair2, interval)
+	<-klineChan1
+	<-klineChan2
+
+	// 创建多个订单
+	order1, _ := svc.CreateOrder(ctx, exchange.CreateOrderReq{
+		TradingPair: pair1,
+		OrderType:   exchange.OrderTypeOpen,
+		PositonSide: exchange.PositionSideLong,
+		Price:       decimal.NewFromFloat(49000),
+		Quantity:    decimal.NewFromFloat(0.1),
+		Timestamp:   time.Now(),
+	})
+
+	order2, _ := svc.CreateOrder(ctx, exchange.CreateOrderReq{
+		TradingPair: pair1,
+		OrderType:   exchange.OrderTypeOpen,
+		PositonSide: exchange.PositionSideLong,
+		Price:       decimal.NewFromFloat(49500),
+		Quantity:    decimal.NewFromFloat(0.1),
+		Timestamp:   time.Now(),
+	})
+
+	_, _ = svc.CreateOrder(ctx, exchange.CreateOrderReq{
+		TradingPair: pair2,
+		OrderType:   exchange.OrderTypeOpen,
+		PositonSide: exchange.PositionSideLong,
+		Price:       decimal.NewFromFloat(2900),
+		Quantity:    decimal.NewFromFloat(1.0),
+		Timestamp:   time.Now(),
+	})
+
+	// 验证所有订单都在挂单列表中
+	orders, _ := svc.GetOrders(ctx, exchange.GetOrdersReq{})
+	assert.Len(t, orders, 3, "应该有3个挂单")
+
+	t.Run("取消特定订单（有ID和TradingPair）", func(t *testing.T) {
+		err := svc.CancelOrder(ctx, exchange.CancelOrderReq{
+			Id:          order1,
+			TradingPair: pair1,
+		})
+		require.NoError(t, err)
+
+		// 检查订单状态
+		canceledOrder, _ := svc.GetOrder(ctx, exchange.GetOrderReq{Id: order1})
+		assert.Equal(t, exchange.OrderStatus("cancelled"), canceledOrder.Status)
+
+		// 检查挂单列表
+		orders, _ := svc.GetOrders(ctx, exchange.GetOrdersReq{})
+		assert.Len(t, orders, 2, "应该剩余2个挂单")
+	})
+
+	t.Run("取消特定订单但TradingPair不匹配", func(t *testing.T) {
+		err := svc.CancelOrder(ctx, exchange.CancelOrderReq{
+			Id:          order2,
+			TradingPair: pair2, // 订单2属于pair1，但这里用pair2
+		})
+		assert.Error(t, err, "TradingPair不匹配应该返回错误")
+		assert.Contains(t, err.Error(), "does not belong to trading pair")
+
+		// 订单应该还在
+		orders, _ := svc.GetOrders(ctx, exchange.GetOrdersReq{})
+		assert.Len(t, orders, 2, "订单不应该被取消")
+	})
+
+	t.Run("取消交易对的所有订单（ID为空）", func(t *testing.T) {
+		// pair1还有order2
+		// pair2有order3
+		err := svc.CancelOrder(ctx, exchange.CancelOrderReq{
+			Id:          "", // 空ID
+			TradingPair: pair1,
+		})
+		require.NoError(t, err)
+
+		// pair1的订单应该被取消
+		orders, _ := svc.GetOrders(ctx, exchange.GetOrdersReq{TradingPair: pair1})
+		assert.Len(t, orders, 0, "pair1的订单应该全部被取消")
+
+		// pair2的订单应该还在
+		orders, _ = svc.GetOrders(ctx, exchange.GetOrdersReq{TradingPair: pair2})
+		assert.Len(t, orders, 1, "pair2的订单应该还在")
+	})
+
+	t.Run("取消所有订单（ID和TradingPair都为空）", func(t *testing.T) {
+		// 创建新订单
+		svc.CreateOrder(ctx, exchange.CreateOrderReq{
+			TradingPair: pair1,
+			OrderType:   exchange.OrderTypeOpen,
+			PositonSide: exchange.PositionSideLong,
+			Price:       decimal.NewFromFloat(49000),
+			Quantity:    decimal.NewFromFloat(0.1),
+			Timestamp:   time.Now(),
+		})
+
+		orders, _ := svc.GetOrders(ctx, exchange.GetOrdersReq{})
+		assert.Len(t, orders, 2, "应该有2个挂单")
+
+		err := svc.CancelOrder(ctx, exchange.CancelOrderReq{
+			Id:          "",                     // 空ID
+			TradingPair: exchange.TradingPair{}, // 空TradingPair
+		})
+		require.NoError(t, err)
+
+		// 所有订单应该被取消
+		orders, _ = svc.GetOrders(ctx, exchange.GetOrdersReq{})
+		assert.Len(t, orders, 0, "所有订单应该被取消")
+	})
 }

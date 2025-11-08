@@ -13,7 +13,6 @@ import (
 
 // 编译时检查接口实现
 var _ exchange.Service = (*ExchangeService)(nil)
-var _ exchangeService = (*ExchangeService)(nil)
 
 type ExchangeService struct {
 	klineProvider KlineProvider // K线数据提供者
@@ -26,13 +25,9 @@ type ExchangeService struct {
 
 	// 模拟交易状态
 	orderMu       sync.RWMutex
-	orders        map[exchange.OrderId]*OrderInfo     // 所有订单（含止盈止损）
-	pendingOrders map[exchange.OrderId]*OrderInfo     // 待成交订单（挂单）
-	stopOrders    map[exchange.OrderId]*StopOrderInfo // 止盈止损订单
+	orders        map[exchange.OrderId]*exchange.OrderInfo // 所有订单（含止盈止损）
+	pendingOrders map[exchange.OrderId]*exchange.OrderInfo // 待成交订单（挂单）
 	nextOrderId   int64
-
-	// 待设置的止盈止损订单（key: 开仓订单ID）
-	pendingStopOrders map[exchange.OrderId]*PendingStopOrders
 
 	positionMu sync.RWMutex
 	positions  map[string]*exchange.Position // key: tradingPair_positionSide
@@ -69,12 +64,11 @@ func NewExchangeService(startTime, endTime time.Time, initialBalance decimal.Dec
 		endTime:       endTime,
 
 		// 初始化模拟交易状态
-		orders:            make(map[exchange.OrderId]*OrderInfo),
-		pendingOrders:     make(map[exchange.OrderId]*OrderInfo),
-		stopOrders:        make(map[exchange.OrderId]*StopOrderInfo),
-		pendingStopOrders: make(map[exchange.OrderId]*PendingStopOrders),
-		nextOrderId:       1,
-		positions:         make(map[string]*exchange.Position),
+		orders:        make(map[exchange.OrderId]*exchange.OrderInfo),
+		pendingOrders: make(map[exchange.OrderId]*exchange.OrderInfo),
+
+		nextOrderId: 1,
+		positions:   make(map[string]*exchange.Position),
 		account: &exchange.AccountInfo{
 			TotalBalance:     initialBalance,
 			AvailableBalance: initialBalance,
@@ -183,6 +177,7 @@ func (svc *ExchangeService) SubscribeKline(ctx context.Context, tradingPair exch
 				default:
 				}
 
+				time.Sleep(time.Microsecond * 100)
 				// 更新当前价格为K线收盘价（用于市价单成交）
 				svc.updatePrice(tradingPair, kline.Close)
 
@@ -203,10 +198,6 @@ func (svc *ExchangeService) SubscribeKline(ctx context.Context, tradingPair exch
 					return
 				}
 
-				// 🔑 第二次扫描：处理基于当前K线创建的订单
-				// 这样可以确保外部协程在收到K线后立即下单，订单能在当前K线被扫描到
-				// 避免订单延迟到下一根K线才被处理
-				svc.scanOrders(ctx, tradingPair, kline)
 			}
 
 			// 移动到下一批
@@ -286,10 +277,6 @@ func (svc *ExchangeService) OrderService() exchange.OrderService {
 	return svc
 }
 
-func (svc *ExchangeService) TradingService() exchange.TradingService {
-	return svc
-}
-
 // ============ 持仓未实现盈亏更新 ============
 
 // updatePositionsPnl 更新指定交易对的持仓未实现盈亏和标记价格
@@ -321,210 +308,109 @@ func (svc *ExchangeService) updatePositionsPnl(tradingPair exchange.TradingPair,
 
 // ============ 订单扫描机制 ============
 
-// scanOrders 扫描所有待成交订单和止盈止损订单
+// scanOrders 扫描所有待成交订单
 // 在每次K线推送时调用
 func (svc *ExchangeService) scanOrders(ctx context.Context, tradingPair exchange.TradingPair, kline exchange.Kline) {
-	fmt.Printf("[DEBUG] scanOrders: pair=%s, price=%s\n", tradingPair.ToString(), kline.Close)
-
-	// 1. 扫描待成交的挂单
+	// 扫描待成交的挂单
 	svc.scanPendingOrders(ctx, tradingPair, kline)
-
-	// 2. 扫描止盈止损订单
-	svc.scanStopOrders(ctx, tradingPair, kline)
 }
 
 // scanPendingOrders 扫描待成交订单，检查是否满足成交条件
 func (svc *ExchangeService) scanPendingOrders(ctx context.Context, tradingPair exchange.TradingPair, kline exchange.Kline) {
 	svc.orderMu.RLock()
 	// 复制一份待扫描的订单列表（避免在锁内执行耗时操作）
-	pendingList := make([]*OrderInfo, 0, len(svc.pendingOrders))
+	pendingList := make([]*exchange.OrderInfo, 0, len(svc.pendingOrders))
 	for _, order := range svc.pendingOrders {
 		// 只扫描当前K线对应的交易对
-		if order.OrderInfo.TradingPair == tradingPair {
+		if order.TradingPair == tradingPair {
 			pendingList = append(pendingList, order)
 		}
 	}
 	svc.orderMu.RUnlock()
 
-	fmt.Printf("[DEBUG] scanPendingOrders: 待扫描订单数=%d\n", len(pendingList))
-
 	// 检查每个订单是否满足成交条件
 	for _, order := range pendingList {
-		fmt.Printf("[DEBUG] 检查订单 %s: 价格=%s, 市价=%v\n", order.Id, order.Price, order.Price.IsZero())
 		if svc.checkOrderFilled(order, kline) {
 			// 订单满足成交条件，执行成交
-			fmt.Printf("[DEBUG] 订单 %s 满足成交条件，执行成交\n", order.Id)
 			svc.fillOrder(ctx, order, kline)
 		}
 	}
 }
 
 // checkOrderFilled 检查订单是否满足成交条件
-func (svc *ExchangeService) checkOrderFilled(order *OrderInfo, kline exchange.Kline) bool {
-	// 限价单逻辑：
-	// - 买单：当K线最低价 <= 限价，则成交
-	// - 卖单：当K线最高价 >= 限价，则成交
-
+// 根据 OrderType + PositionSide 组合判断订单方向：
+// - Open + Long (开多)：买入，K线最低价 <= 限价时成交
+// - Open + Short (开空)：卖出，K线最高价 >= 限价时成交
+// - Close + Long (平多)：卖出，K线最高价 >= 限价时成交
+// - Close + Short (平空)：买入，K线最低价 <= 限价时成交
+func (svc *ExchangeService) checkOrderFilled(order *exchange.OrderInfo, kline exchange.Kline) bool {
+	// 市价单，立即成交
 	if order.Price.IsZero() {
-		// 市价单，立即成交
 		return true
 	}
 
-	if order.Side == exchange.OrderSideBuy {
-		// 买单：K线最低价触及或低于限价
+	// 限价单：判断K线价格区间是否触碰到限价
+	isBuyOrder := (order.OrderType == exchange.OrderTypeOpen && order.PositionSide == exchange.PositionSideLong) ||
+		(order.OrderType == exchange.OrderTypeClose && order.PositionSide == exchange.PositionSideShort)
+
+	if isBuyOrder {
+		// 买入订单：K线最低价触及或低于限价时成交
 		return kline.Low.LessThanOrEqual(order.Price)
 	} else {
-		// 卖单：K线最高价触及或高于限价
+		// 卖出订单：K线最高价触及或高于限价时成交
 		return kline.High.GreaterThanOrEqual(order.Price)
 	}
 }
 
 // fillOrder 执行订单成交
-func (svc *ExchangeService) fillOrder(ctx context.Context, order *OrderInfo, kline exchange.Kline) error {
+func (svc *ExchangeService) fillOrder(ctx context.Context, order *exchange.OrderInfo, kline exchange.Kline) error {
+	// 确定成交价格
+	fillPrice := order.Price
+	if fillPrice.IsZero() {
+		// 市价单使用当前K线开盘价
+		fillPrice = kline.Open
+	}
+	// 否则使用限价单的挂单价格成交
+
+	// 执行持仓变更
+	posKey := svc.getPositionKey(order.TradingPair, order.PositionSide)
+
+	var executedQuantity decimal.Decimal
+	var err error
+
+	if order.OrderType == exchange.OrderTypeOpen {
+		// 开仓或加仓（可能部分成交）
+		executedQuantity, err = svc.openPosition(posKey, order, fillPrice)
+		if err != nil {
+			return err
+		}
+	} else {
+		// 平仓或减仓
+		err = svc.closePosition(posKey, order, fillPrice)
+		if err != nil {
+			return err
+		}
+		executedQuantity = order.Quantity
+	}
+
 	// 更新订单状态
 	svc.orderMu.Lock()
 
 	// 从待成交列表移除
 	delete(svc.pendingOrders, exchange.OrderId(order.Id))
 
-	// 更新订单状态为已成交
-	order.Status = exchange.OrderStatusFilled
-	order.ExecutedQuantity = order.Quantity
-	now := svc.now(order.OrderInfo.TradingPair)
+	// 更新订单状态和成交数量
+	order.ExecutedQuantity = executedQuantity
+	if executedQuantity.Equal(order.Quantity) {
+		order.Status = exchange.OrderStatusFilled
+	} else {
+		order.Status = exchange.OrderStatusPartiallyFilled
+	}
+	now := svc.now(order.TradingPair)
 	order.UpdatedAt = now
 	order.CompletedAt = now
 
-	// 确定成交价格
-	fillPrice := order.Price
-	if fillPrice.IsZero() {
-		// 市价单使用当前K线收盘价
-		fillPrice = kline.Close
-	}
-
 	svc.orderMu.Unlock()
 
-	// 执行持仓变更
-	posKey := svc.getPositionKey(order.OrderInfo.TradingPair, order.PositionSide)
-
-	if order.OrderType == exchange.OrderTypeOpen {
-		// 开仓或加仓
-		return svc.openPosition(posKey, order, fillPrice)
-	} else {
-		// 平仓或减仓
-		return svc.closePosition(posKey, order, fillPrice)
-	}
-}
-
-// scanStopOrders 扫描止盈止损订单
-func (svc *ExchangeService) scanStopOrders(ctx context.Context, tradingPair exchange.TradingPair, kline exchange.Kline) {
-	svc.orderMu.RLock()
-	// 复制一份待扫描的止盈止损订单列表
-	stopList := make([]*StopOrderInfo, 0, len(svc.stopOrders))
-	for _, stopOrder := range svc.stopOrders {
-		// 只扫描当前K线对应的交易对
-		if stopOrder.TradingPair == tradingPair {
-			stopList = append(stopList, stopOrder)
-		}
-	}
-	svc.orderMu.RUnlock()
-
-	// 检查每个止盈止损订单是否触发
-	for _, stopOrder := range stopList {
-		if svc.checkStopOrderTriggered(stopOrder, kline) {
-			// 止盈止损触发，执行平仓
-			svc.triggerStopOrder(ctx, stopOrder, kline)
-		}
-	}
-}
-
-// checkStopOrderTriggered 检查止盈止损订单是否触发
-func (svc *ExchangeService) checkStopOrderTriggered(stopOrder *StopOrderInfo, kline exchange.Kline) bool {
-	// 止盈止损触发逻辑：
-	// 多头持仓：
-	//   - 止盈：价格上涨到触发价 (high >= trigger)
-	//   - 止损：价格下跌到触发价 (low <= trigger)
-	// 空头持仓：
-	//   - 止盈：价格下跌到触发价 (low <= trigger)
-	//   - 止损：价格上涨到触发价 (high >= trigger)
-
-	if stopOrder.StopType == StopOrderTypeTakeProfit {
-		// 止盈订单
-		if stopOrder.PositionSide == exchange.PositionSideLong {
-			// 多头止盈：价格上涨触发
-			return kline.High.GreaterThanOrEqual(stopOrder.TriggerPrice)
-		} else {
-			// 空头止盈：价格下跌触发
-			return kline.Low.LessThanOrEqual(stopOrder.TriggerPrice)
-		}
-	} else {
-		// 止损订单
-		if stopOrder.PositionSide == exchange.PositionSideLong {
-			// 多头止损：价格下跌触发
-			return kline.Low.LessThanOrEqual(stopOrder.TriggerPrice)
-		} else {
-			// 空头止损：价格上涨触发
-			return kline.High.GreaterThanOrEqual(stopOrder.TriggerPrice)
-		}
-	}
-}
-
-// triggerStopOrder 触发止盈止损订单
-func (svc *ExchangeService) triggerStopOrder(ctx context.Context, stopOrder *StopOrderInfo, kline exchange.Kline) error {
-	// 从止盈止损列表移除当前订单
-	svc.orderMu.Lock()
-	delete(svc.stopOrders, stopOrder.Id)
-
-	// 🔑 同时删除该持仓的其他止盈止损订单（止盈触发后删除止损，止损触发后删除止盈）
-	for id, otherStopOrder := range svc.stopOrders {
-		if otherStopOrder.PositionKey == stopOrder.PositionKey && id != stopOrder.Id {
-			delete(svc.stopOrders, id)
-		}
-	}
-	svc.orderMu.Unlock()
-
-	// 获取持仓
-	posKey := stopOrder.PositionKey
-	svc.positionMu.RLock()
-	position, exists := svc.positions[posKey]
-	svc.positionMu.RUnlock()
-
-	if !exists {
-		// 持仓已不存在（可能已被其他订单平仓）
-		return nil
-	}
-
-	// 计算平仓数量（使用当前实际持仓数量，避免过度平仓）
-	quantity := stopOrder.Quantity
-	if quantity.IsZero() || quantity.GreaterThan(position.Quantity) {
-		quantity = position.Quantity // 全平或调整为实际数量
-	}
-
-	// 创建一个虚拟订单信息（用于记录）
-	orderId := svc.generateOrderId()
-	now := svc.now(stopOrder.TradingPair)
-
-	order := &OrderInfo{
-		OrderInfo: exchange.OrderInfo{
-			Id:               orderId.ToString(),
-			TradingPair:      stopOrder.TradingPair,
-			Side:             stopOrder.OrderSide, // BUY或SELL
-			Price:            stopOrder.TriggerPrice,
-			Quantity:         quantity,
-			ExecutedQuantity: quantity,
-			Status:           exchange.OrderStatusFilled, // 立即标记为已成交
-			CreatedAt:        now,
-			UpdatedAt:        now,
-			CompletedAt:      now,
-		},
-		OrderType:    exchange.OrderTypeClose,
-		PositionSide: stopOrder.PositionSide,
-	}
-
-	// 保存订单记录（用于历史查询）
-	svc.orderMu.Lock()
-	svc.orders[orderId] = order
-	svc.orderMu.Unlock()
-
-	// 🔑 直接执行平仓，不创建挂单
-	return svc.closePosition(posKey, order, stopOrder.TriggerPrice)
+	return nil
 }

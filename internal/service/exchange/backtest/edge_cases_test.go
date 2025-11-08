@@ -336,24 +336,25 @@ func TestEdgeCase_StopOrderAfterPositionClosed(t *testing.T) {
 	<-klineChan
 
 	// 开仓并设置止盈
-	resp, _ := svc.OpenPosition(ctx, exchange.OpenPositionReq{
-		TradingPair:  pair,
-		PositionSide: exchange.PositionSideLong,
-		Price:        decimal.Zero,
-		Quantity:     decimal.NewFromFloat(0.1),
-		TakeProfit: exchange.StopOrder{
-			Price: decimal.NewFromFloat(51000),
-		},
+	resp, _ := svc.CreateOrder(ctx, exchange.CreateOrderReq{
+		TradingPair: pair,
+		OrderType:   exchange.OrderTypeOpen,
+		PositonSide: exchange.PositionSideLong,
+		Price:       decimal.Zero,
+		Quantity:    decimal.NewFromFloat(0.1),
+		Timestamp:   time.Now(),
 	})
 	<-klineChan
 	<-klineChan // 等待开仓成交
 
 	// 手动平仓
-	svc.ClosePosition(ctx, exchange.ClosePositionReq{
-		TradingPair:  pair,
-		PositionSide: exchange.PositionSideLong,
-		Price:        decimal.Zero,
-		CloseAll:     true,
+	svc.CreateOrder(ctx, exchange.CreateOrderReq{
+		TradingPair: pair,
+		OrderType:   exchange.OrderTypeClose,
+		PositonSide: exchange.PositionSideLong,
+		Price:       decimal.Zero,
+		Quantity:    decimal.NewFromFloat(0.1),
+		Timestamp:   time.Now(),
 	})
 	<-klineChan
 	<-klineChan // 等待平仓成交
@@ -371,7 +372,7 @@ func TestEdgeCase_StopOrderAfterPositionClosed(t *testing.T) {
 	positions, _ = svc.GetActivePositions(ctx, []exchange.TradingPair{pair})
 	assert.Empty(t, positions)
 
-	t.Logf("止盈订单ID: %s", resp.TakeProfitId)
+	t.Logf("止盈订单ID: %s", resp)
 }
 
 // TestEdgeCase_ConcurrentOrders 测试并发创建订单

@@ -13,9 +13,6 @@ func (svc *ExchangeService) CreateOrder(ctx context.Context, req exchange.Create
 	orderId := svc.generateOrderId()
 	now := svc.now(req.TradingPair)
 
-	// 计算订单方向
-	side := calculateOrderSide(req.OrderType, req.PositonSide)
-
 	if req.OrderType == exchange.OrderTypeOpen {
 		// 🔑 开仓订单：冻结资金（应用杠杆）
 		// 获取订单价格（限价单用限价，市价单用当前价）
@@ -83,20 +80,17 @@ func (svc *ExchangeService) CreateOrder(ctx context.Context, req exchange.Create
 	}
 
 	// 创建订单记录（扩展版本）
-	order := &OrderInfo{
-		OrderInfo: exchange.OrderInfo{
-			Id:               orderId.ToString(),
-			TradingPair:      req.TradingPair,
-			Side:             side,
-			Price:            req.Price,
-			Quantity:         req.Quantity,
-			ExecutedQuantity: decimal.Zero,                // 初始未成交
-			Status:           exchange.OrderStatusPending, // 挂单状态
-			CreatedAt:        now,
-			UpdatedAt:        now,
-		},
-		OrderType:    req.OrderType,
-		PositionSide: req.PositonSide,
+	order := &exchange.OrderInfo{
+		Id:               orderId.ToString(),
+		TradingPair:      req.TradingPair,
+		OrderType:        req.OrderType,
+		PositionSide:     req.PositonSide,
+		Price:            req.Price,
+		Quantity:         req.Quantity,
+		ExecutedQuantity: decimal.Zero,                // 初始未成交
+		Status:           exchange.OrderStatusPending, // 挂单状态
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 
 	// 保存订单
@@ -104,7 +98,6 @@ func (svc *ExchangeService) CreateOrder(ctx context.Context, req exchange.Create
 	svc.orders[orderId] = order
 	// 添加到待成交订单列表
 	svc.pendingOrders[orderId] = order
-	fmt.Printf("[DEBUG] CreateOrder: 订单 %s 已添加到pendingOrders, 总数=%d\n", orderId, len(svc.pendingOrders))
 	svc.orderMu.Unlock()
 
 	return orderId, nil
@@ -143,7 +136,7 @@ func (svc *ExchangeService) GetOrder(ctx context.Context, req exchange.GetOrderR
 		return exchange.OrderInfo{}, fmt.Errorf("order not found: %s", req.Id)
 	}
 
-	return order.OrderInfo, nil
+	return *order, nil
 }
 
 // GetOrders 获取待成交订单列表
@@ -153,8 +146,8 @@ func (svc *ExchangeService) GetOrders(ctx context.Context, req exchange.GetOrder
 
 	var orders []exchange.OrderInfo
 	for _, order := range svc.pendingOrders {
-		if req.TradingPair.IsZero() || order.OrderInfo.TradingPair == req.TradingPair {
-			orders = append(orders, order.OrderInfo)
+		if req.TradingPair.IsZero() || order.TradingPair == req.TradingPair {
+			orders = append(orders, *order)
 		}
 	}
 
@@ -162,7 +155,15 @@ func (svc *ExchangeService) GetOrders(ctx context.Context, req exchange.GetOrder
 }
 
 // CancelOrder 取消订单
+// - 如果 Id 为空，撤销该交易对的所有挂单
+// - 如果有 Id，则匹配 TradingPair + Id 来撤销特定订单
 func (svc *ExchangeService) CancelOrder(ctx context.Context, req exchange.CancelOrderReq) error {
+	if req.Id.IsZero() {
+		// Id 为空：撤销该交易对的所有挂单
+		return svc.cancelOrdersByTradingPair(ctx, req.TradingPair)
+	}
+
+	// 有 Id：撤销特定订单
 	svc.orderMu.Lock()
 	order, exists := svc.pendingOrders[req.Id]
 	if !exists {
@@ -170,15 +171,18 @@ func (svc *ExchangeService) CancelOrder(ctx context.Context, req exchange.Cancel
 		return fmt.Errorf("order not found or already filled: %s", req.Id)
 	}
 
+	// 检查交易对是否匹配
+	if !req.TradingPair.IsZero() && order.TradingPair != req.TradingPair {
+		svc.orderMu.Unlock()
+		return fmt.Errorf("order %s does not belong to trading pair %s", req.Id, req.TradingPair.ToString())
+	}
+
 	// 从待成交列表移除
 	delete(svc.pendingOrders, req.Id)
 
-	// 🔑 清理待设置的止盈止损订单（如果有）
-	delete(svc.pendingStopOrders, req.Id)
-
 	// 更新订单状态为已取消
 	order.Status = exchange.OrderStatus("cancelled")
-	order.UpdatedAt = svc.now(order.OrderInfo.TradingPair)
+	order.UpdatedAt = svc.now(order.TradingPair)
 
 	// 🔑 释放冻结的资金或持仓
 	if order.OrderType == exchange.OrderTypeOpen {
@@ -209,6 +213,37 @@ func (svc *ExchangeService) CancelOrder(ctx context.Context, req exchange.Cancel
 	return nil
 }
 
+// cancelOrdersByTradingPair 撤销指定交易对的所有挂单
+func (svc *ExchangeService) cancelOrdersByTradingPair(ctx context.Context, tradingPair exchange.TradingPair) error {
+	svc.orderMu.RLock()
+	// 收集需要撤销的订单ID
+	var orderIds []exchange.OrderId
+	for id, order := range svc.pendingOrders {
+		if tradingPair.IsZero() || order.TradingPair == tradingPair {
+			orderIds = append(orderIds, id)
+		}
+	}
+	svc.orderMu.RUnlock()
+
+	if len(orderIds) == 0 {
+		return nil // 没有需要撤销的订单
+	}
+
+	// 逐个撤销订单
+	for _, id := range orderIds {
+		err := svc.CancelOrder(ctx, exchange.CancelOrderReq{
+			Id:          id,
+			TradingPair: tradingPair,
+		})
+		if err != nil {
+			// 如果订单已经成交或不存在，忽略错误继续处理其他订单
+			continue
+		}
+	}
+
+	return nil
+}
+
 // CancelOrders 批量取消订单
 func (svc *ExchangeService) CancelOrders(ctx context.Context, req exchange.CancelOrdersReq) error {
 	// 获取需要取消的订单ID列表
@@ -217,7 +252,7 @@ func (svc *ExchangeService) CancelOrders(ctx context.Context, req exchange.Cance
 		// 取消指定交易对的所有订单
 		svc.orderMu.RLock()
 		for id, order := range svc.pendingOrders {
-			if req.TradingPair.IsZero() || order.OrderInfo.TradingPair == req.TradingPair {
+			if req.TradingPair.IsZero() || order.TradingPair == req.TradingPair {
 				orderIds = append(orderIds, id)
 			}
 		}
@@ -235,32 +270,14 @@ func (svc *ExchangeService) CancelOrders(ctx context.Context, req exchange.Cance
 	return nil
 }
 
-// ============ 辅助方法 ============
-
-// calculateOrderSide 根据订单类型和持仓方向计算订单方向
-func calculateOrderSide(orderType exchange.OrderType, positionSide exchange.PositionSide) exchange.OrderSide {
-	if orderType == exchange.OrderTypeOpen {
-		// 开仓
-		if positionSide == exchange.PositionSideLong {
-			return exchange.OrderSideBuy
-		}
-		return exchange.OrderSideSell
-	} else {
-		// 平仓
-		if positionSide == exchange.PositionSideLong {
-			return exchange.OrderSideSell
-		}
-		return exchange.OrderSideBuy
-	}
-}
-
 // openPosition 开仓或加仓
-func (svc *ExchangeService) openPosition(posKey string, order *OrderInfo, price decimal.Decimal) error {
+// 返回实际成交的数量（可能因资金不足而部分成交）
+func (svc *ExchangeService) openPosition(posKey string, order *exchange.OrderInfo, price decimal.Decimal) (decimal.Decimal, error) {
 	svc.positionMu.Lock()
 	defer svc.positionMu.Unlock()
 
 	// 🔑 获取杠杆倍数
-	leverage := svc.getLeverage(order.OrderInfo.TradingPair)
+	leverage := svc.getLeverage(order.TradingPair)
 
 	// 计算实际所需保证金（价格 × 数量 ÷ 杠杆）
 	actualCost := price.Mul(order.Quantity).Div(decimal.NewFromInt(int64(leverage)))
@@ -269,42 +286,64 @@ func (svc *ExchangeService) openPosition(posKey string, order *OrderInfo, price 
 	orderId := exchange.OrderId(order.Id)
 	svc.accountMu.Lock()
 	frozenAmount, wasFrozen := svc.frozenFunds[orderId]
-	if wasFrozen {
-		// ✅ 挂单已冻结资金，现在转为保证金
-		delete(svc.frozenFunds, orderId)
-
-		// 计算冻结金额与实际成交金额的差额
-		// 对于市价单，冻结时使用估算价格，成交时使用实际价格
-		diff := frozenAmount.Sub(actualCost)
-
-		if diff.IsPositive() {
-			// 冻结金额 > 实际成交金额，返还多余部分到可用余额
-			svc.account.AvailableBalance = svc.account.AvailableBalance.Add(diff)
-			svc.account.UsedMargin = svc.account.UsedMargin.Add(actualCost)
-		} else if diff.IsNegative() {
-			// 冻结金额 < 实际成交金额，需要额外扣除可用余额
-			shortage := diff.Abs()
-			if svc.account.AvailableBalance.LessThan(shortage) {
-				svc.accountMu.Unlock()
-				return fmt.Errorf("insufficient balance for price difference: available=%s, need=%s",
-					svc.account.AvailableBalance, shortage)
-			}
-			svc.account.AvailableBalance = svc.account.AvailableBalance.Sub(shortage)
-			svc.account.UsedMargin = svc.account.UsedMargin.Add(actualCost)
-		} else {
-			// 正好相等
-			svc.account.UsedMargin = svc.account.UsedMargin.Add(actualCost)
-		}
-	} else {
+	if !wasFrozen {
 		// ⚠️ 没有冻结资金（止盈止损触发、或其他特殊情况）
 		// 这种情况下无法开仓，因为没有预留资金
 		svc.accountMu.Unlock()
-		return fmt.Errorf("no frozen funds for order %s, cannot open position", orderId)
+		return decimal.Zero, fmt.Errorf("no frozen funds for order %s, cannot open position", orderId)
+	}
+
+	// ✅ 挂单已冻结资金，现在转为保证金
+	delete(svc.frozenFunds, orderId)
+
+	// 计算冻结金额与实际成交金额的差额
+	// 对于市价单，冻结时使用估算价格，成交时使用实际价格
+	diff := frozenAmount.Sub(actualCost)
+
+	// 实际成交的数量（默认为订单数量）
+	executedQuantity := order.Quantity
+	actualMargin := actualCost
+
+	if diff.IsPositive() {
+		// 冻结金额 > 实际成交金额，返还多余部分到可用余额
+		svc.account.AvailableBalance = svc.account.AvailableBalance.Add(diff)
+		svc.account.UsedMargin = svc.account.UsedMargin.Add(actualCost)
+	} else if diff.IsNegative() {
+		// 冻结金额 < 实际成交金额，需要额外扣除可用余额
+		shortage := diff.Abs()
+
+		if svc.account.AvailableBalance.LessThan(shortage) {
+			// 🔑 可用余额不足，计算能够成交的最大数量（部分成交）
+			// 可用总资金 = 冻结资金 + 剩余可用余额
+			totalAvailable := frozenAmount.Add(svc.account.AvailableBalance)
+
+			// 能够开仓的最大数量 = 可用总资金 × 杠杆 ÷ 成交价格
+			maxQuantity := totalAvailable.Mul(decimal.NewFromInt(int64(leverage))).Div(price)
+
+			if maxQuantity.LessThan(order.Quantity) {
+				// 部分成交：使用全部可用资金
+				executedQuantity = maxQuantity
+				actualMargin = totalAvailable
+				svc.account.AvailableBalance = decimal.Zero
+				svc.account.UsedMargin = svc.account.UsedMargin.Add(actualMargin)
+			} else {
+				// 理论上不应该到这里（计算误差导致）
+				svc.account.AvailableBalance = svc.account.AvailableBalance.Sub(shortage)
+				svc.account.UsedMargin = svc.account.UsedMargin.Add(actualCost)
+			}
+		} else {
+			// 余额充足，完全成交
+			svc.account.AvailableBalance = svc.account.AvailableBalance.Sub(shortage)
+			svc.account.UsedMargin = svc.account.UsedMargin.Add(actualCost)
+		}
+	} else {
+		// 正好相等
+		svc.account.UsedMargin = svc.account.UsedMargin.Add(actualCost)
 	}
 	svc.accountMu.Unlock()
 
 	position, exists := svc.positions[posKey]
-	now := svc.now(order.OrderInfo.TradingPair)
+	now := svc.now(order.TradingPair)
 
 	// 📝 持仓历史记录
 	svc.historyMu.Lock()
@@ -313,7 +352,7 @@ func (svc *ExchangeService) openPosition(posKey string, order *OrderInfo, price 
 	if !exists {
 		// 创建新仓位
 		position = &exchange.Position{
-			TradingPair:      order.OrderInfo.TradingPair,
+			TradingPair:      order.TradingPair,
 			PositionSide:     order.PositionSide,
 			EntryPrice:       price,
 			BreakEvenPrice:   price,
@@ -321,8 +360,8 @@ func (svc *ExchangeService) openPosition(posKey string, order *OrderInfo, price 
 			Leverage:         leverage, // 使用实际杠杆
 			LiquidationPrice: decimal.Zero,
 			MarkPrice:        price,
-			Quantity:         order.Quantity,
-			MarginAmount:     actualCost,
+			Quantity:         executedQuantity, // 使用实际成交数量
+			MarginAmount:     actualMargin,     // 使用实际保证金
 			UnrealizedPnl:    decimal.Zero,
 			CreatedAt:        now,
 			UpdatedAt:        now,
@@ -332,10 +371,10 @@ func (svc *ExchangeService) openPosition(posKey string, order *OrderInfo, price 
 		// 创建持仓历史记录
 		if !historyExists {
 			history = &exchange.PositionHistory{
-				TradingPair:  order.OrderInfo.TradingPair,
+				TradingPair:  order.TradingPair,
 				PositionSide: order.PositionSide,
 				EntryPrice:   price,
-				MaxQuantity:  order.Quantity,
+				MaxQuantity:  executedQuantity,
 				OpenedAt:     now,
 				Events:       []exchange.PositionEvent{},
 			}
@@ -346,9 +385,9 @@ func (svc *ExchangeService) openPosition(posKey string, order *OrderInfo, price 
 		history.Events = append(history.Events, exchange.PositionEvent{
 			OrderId:        exchange.OrderId(order.Id),
 			EventType:      exchange.PositionEventTypeCreate,
-			Quantity:       order.Quantity,
+			Quantity:       executedQuantity,
 			BeforeQuantity: decimal.Zero,
-			AfterQuantity:  order.Quantity,
+			AfterQuantity:  executedQuantity,
 			Price:          price,
 			RealizedPnl:    decimal.Zero,
 			Fee:            decimal.Zero,
@@ -359,12 +398,12 @@ func (svc *ExchangeService) openPosition(posKey string, order *OrderInfo, price 
 	} else {
 		// 加仓：计算新的平均入场价
 		oldQuantity := position.Quantity
-		totalCost := position.EntryPrice.Mul(position.Quantity).Add(price.Mul(order.Quantity))
-		totalQuantity := position.Quantity.Add(order.Quantity)
+		totalCost := position.EntryPrice.Mul(position.Quantity).Add(price.Mul(executedQuantity))
+		totalQuantity := position.Quantity.Add(executedQuantity)
 		position.EntryPrice = totalCost.Div(totalQuantity)
 		position.BreakEvenPrice = position.EntryPrice
 		position.Quantity = totalQuantity
-		position.MarginAmount = position.MarginAmount.Add(actualCost)
+		position.MarginAmount = position.MarginAmount.Add(actualMargin)
 		position.UpdatedAt = now
 
 		// 更新最大持仓数量
@@ -377,7 +416,7 @@ func (svc *ExchangeService) openPosition(posKey string, order *OrderInfo, price 
 			history.Events = append(history.Events, exchange.PositionEvent{
 				OrderId:        exchange.OrderId(order.Id),
 				EventType:      exchange.PositionEventTypeIncrease,
-				Quantity:       order.Quantity,
+				Quantity:       executedQuantity,
 				BeforeQuantity: oldQuantity,
 				AfterQuantity:  totalQuantity,
 				Price:          price,
@@ -391,66 +430,12 @@ func (svc *ExchangeService) openPosition(posKey string, order *OrderInfo, price 
 	}
 	svc.historyMu.Unlock()
 
-	// 🔑 检查是否有待设置的止盈止损订单
-	svc.orderMu.Lock()
-	pendingStop, hasPendingStop := svc.pendingStopOrders[orderId]
-	if hasPendingStop {
-		// 从待处理列表移除
-		delete(svc.pendingStopOrders, orderId)
-	}
-	svc.orderMu.Unlock()
-
-	// 如果有待设置的止盈止损订单，现在设置到持仓上
-	if hasPendingStop {
-		// 创建止盈订单（使用预分配的订单ID）
-		if pendingStop.TakeProfit.IsValid() {
-			stopOrder := &StopOrderInfo{
-				Id:           pendingStop.TakeProfitId,
-				TradingPair:  pendingStop.TradingPair,
-				PositionSide: pendingStop.PositionSide,
-				StopType:     StopOrderTypeTakeProfit,
-				OrderSide:    pendingStop.PositionSide.GetCloseOrderSide(),
-				TriggerPrice: pendingStop.TakeProfit.Price,
-				Quantity:     position.Quantity, // 使用当前持仓数量
-				PositionKey:  posKey,
-			}
-
-			svc.orderMu.Lock()
-			svc.stopOrders[pendingStop.TakeProfitId] = stopOrder
-			svc.orderMu.Unlock()
-
-			fmt.Printf("[DEBUG] openPosition: 开仓成交后设置止盈订单 %s (触发价=%s)\n",
-				pendingStop.TakeProfitId, pendingStop.TakeProfit.Price)
-		}
-
-		// 创建止损订单（使用预分配的订单ID）
-		if pendingStop.StopLoss.IsValid() {
-			stopOrder := &StopOrderInfo{
-				Id:           pendingStop.StopLossId,
-				TradingPair:  pendingStop.TradingPair,
-				PositionSide: pendingStop.PositionSide,
-				StopType:     StopOrderTypeStopLoss,
-				OrderSide:    pendingStop.PositionSide.GetCloseOrderSide(),
-				TriggerPrice: pendingStop.StopLoss.Price,
-				Quantity:     position.Quantity, // 使用当前持仓数量
-				PositionKey:  posKey,
-			}
-
-			svc.orderMu.Lock()
-			svc.stopOrders[pendingStop.StopLossId] = stopOrder
-			svc.orderMu.Unlock()
-
-			fmt.Printf("[DEBUG] openPosition: 开仓成交后设置止损订单 %s (触发价=%s)\n",
-				pendingStop.StopLossId, pendingStop.StopLoss.Price)
-		}
-	}
-
 	// ✅ 资金流转完成：冻结资金 → 保证金，差额已调整可用余额
-	return nil
+	return executedQuantity, nil
 }
 
 // closePosition 平仓或减仓
-func (svc *ExchangeService) closePosition(posKey string, order *OrderInfo, price decimal.Decimal) error {
+func (svc *ExchangeService) closePosition(posKey string, order *exchange.OrderInfo, price decimal.Decimal) error {
 	svc.positionMu.Lock()
 	defer svc.positionMu.Unlock()
 
@@ -498,7 +483,7 @@ func (svc *ExchangeService) closePosition(posKey string, order *OrderInfo, price
 	oldQuantity := position.Quantity
 	position.Quantity = position.Quantity.Sub(order.Quantity)
 	position.MarginAmount = position.MarginAmount.Sub(releasedMargin)
-	now := svc.now(order.OrderInfo.TradingPair)
+	now := svc.now(order.TradingPair)
 	position.UpdatedAt = now
 
 	// 📝 持仓历史记录
