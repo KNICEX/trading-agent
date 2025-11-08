@@ -26,7 +26,7 @@ func TestBacktestEngine_WithBinanceData(t *testing.T) {
 	// 1. 准备测试数据 - 回测2024年1月1日到1月3日的BTC数据
 	tradingPair := exchange.TradingPair{Base: "BTC", Quote: "USDT"}
 	startTime := time.Date(2025, 6, 6, 0, 0, 0, 0, time.UTC)
-	endTime := time.Date(2025, 6, 30, 0, 0, 0, 0, time.UTC)
+	endTime := time.Date(2025, 6, 18, 0, 0, 0, 0, time.UTC)
 	initialBalance := decimal.NewFromInt(10000) // 初始资金 10000 USDT
 
 	t.Logf("回测时间段: %s 至 %s", startTime.Format("2006-01-02"), endTime.Format("2006-01-02"))

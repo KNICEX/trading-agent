@@ -177,7 +177,7 @@ func (svc *ExchangeService) SubscribeKline(ctx context.Context, tradingPair exch
 				default:
 				}
 
-				time.Sleep(time.Microsecond * 100)
+				time.Sleep(time.Millisecond * 20)
 				// 更新当前价格为K线收盘价（用于市价单成交）
 				svc.updatePrice(tradingPair, kline.Close)
 
