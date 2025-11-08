@@ -110,7 +110,7 @@ func (e *BacktestEngine) Run(ctx context.Context) error {
 				return
 			}
 			klineChan, err := e.exchangeSvc.MarketService().
-				SubscribeKline(ctx, sg.TradingPair(), exchange.Interval5m)
+				SubscribeKline(ctx, sg.TradingPair(), sg.Interval())
 			if err != nil {
 				return
 			}
@@ -119,7 +119,10 @@ func (e *BacktestEngine) Run(ctx context.Context) error {
 				select {
 				case <-ctx.Done():
 					return
-				case kline := <-klineChan:
+				case kline, ok := <-klineChan:
+					if !ok {
+						return
+					}
 					// 更新ctx时钟
 					sgCtx.setTime(kline.CloseTime)
 
@@ -137,18 +140,21 @@ func (e *BacktestEngine) Run(ctx context.Context) error {
 						continue
 					}
 
+					fmt.Println("signal", signal)
+
 					enhancedSignal, err := e.positionSizer.HandleSignal(context.Background(), signal)
 					if err != nil {
 						continue
 					}
 
 					if !enhancedSignal.Validated {
-						// TODO log
+						fmt.Println("enhancedSignal not validated", enhancedSignal.Reason)
 						continue
 					}
 
 					err = e.executor.Execute(context.Background(), enhancedSignal.EnhancedSignal)
 					if err != nil {
+						fmt.Println("execute error", err)
 						continue
 					}
 

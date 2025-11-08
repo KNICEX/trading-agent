@@ -40,7 +40,7 @@ const (
 	// 有持仓时的操作
 	// SignalActionAdd    SignalAction = "ADD"    // 加仓
 	// SignalActionReduce SignalAction = "REDUCE" // 减仓
-	// SignalActionClose  SignalAction = "CLOSE"  // 平仓
+	SignalActionClose SignalAction = "CLOSE" // 平仓
 )
 
 // Signal 交易信号（简化版）

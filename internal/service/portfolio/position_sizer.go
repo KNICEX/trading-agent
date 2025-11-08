@@ -39,8 +39,8 @@ func (s *SimplePositionSizer) Initialize(ctx context.Context, riskConfig RiskCon
 		return fmt.Errorf("MinProfitLossRatio 必须大于等于 0，当前值: %f", riskConfig.MinProfitLossRatio)
 	}
 
-	if riskConfig.ConfidenceThreshold <= 50 || riskConfig.ConfidenceThreshold > 100 {
-		return fmt.Errorf("ConfidenceThreshold 必须在 (50, 100] 之间，当前值: %f", riskConfig.ConfidenceThreshold)
+	if riskConfig.ConfidenceThreshold <= 0 || riskConfig.ConfidenceThreshold > 1 {
+		return fmt.Errorf("ConfidenceThreshold 必须在 (0, 1] 之间，当前值: %f", riskConfig.ConfidenceThreshold)
 	}
 
 	s.riskConfig = riskConfig

@@ -32,7 +32,7 @@ func (o *OrderService) CreateOrder(ctx context.Context, req exchange.CreateOrder
 
 	service := o.cli.NewCreateOrderService().
 		Symbol(req.TradingPair.ToString()).
-		Side(futures.SideType(side)).                           // 自动计算的 BUY / SELL
+		Side(side).                                             // 自动计算的 BUY / SELL
 		Type(binanceType).                                      // 币安的订单类型
 		Quantity(req.Quantity.String()).                        // 下单数量
 		PositionSide(futures.PositionSideType(req.PositonSide)) // LONG / SHORT
@@ -52,24 +52,24 @@ func (o *OrderService) CreateOrder(ctx context.Context, req exchange.CreateOrder
 }
 
 // calculateOrderSide 根据 OrderType 和 PositionSide 自动计算 Side
-func (o *OrderService) calculateOrderSide(orderType exchange.OrderType, positionSide exchange.PositionSide) exchange.OrderSide {
+func (o *OrderService) calculateOrderSide(orderType exchange.OrderType, positionSide exchange.PositionSide) futures.SideType {
 	switch orderType {
 	case exchange.OrderTypeOpen:
 		// 开仓：LONG 用买单，SHORT 用卖单
 		if positionSide == exchange.PositionSideLong {
-			return exchange.OrderSideBuy
+			return futures.SideTypeBuy
 		}
-		return exchange.OrderSideSell
+		return futures.SideTypeSell
 
 	case exchange.OrderTypeClose:
 		// 平仓：LONG 用卖单，SHORT 用买单
 		if positionSide == exchange.PositionSideLong {
-			return exchange.OrderSideSell
+			return futures.SideTypeSell
 		}
-		return exchange.OrderSideBuy
+		return futures.SideTypeBuy
 
 	default:
-		return exchange.OrderSideBuy
+		return futures.SideTypeBuy
 	}
 }
 
@@ -137,9 +137,10 @@ func (o *OrderService) CreateOrders(ctx context.Context, req []exchange.CreateOr
 }
 
 func (o *OrderService) ModifyOrder(ctx context.Context, req exchange.ModifyOrderReq) error {
+	side := o.calculateOrderSide(req.OrderType, req.PositionSide)
 	service := o.cli.NewModifyOrderService().
 		Symbol(req.TradingPair.ToString()).
-		Side(futures.SideType(req.Side)).
+		Side(side).
 		Quantity(req.Quantity.String())
 
 	if !req.Price.IsZero() {
@@ -161,9 +162,10 @@ func (o *OrderService) ModifyOrder(ctx context.Context, req exchange.ModifyOrder
 func (o *OrderService) ModifyOrders(ctx context.Context, req []exchange.ModifyOrderReq) error {
 	var orderList []*futures.ModifyOrder
 	for _, orderReq := range req {
+		side := o.calculateOrderSide(orderReq.OrderType, orderReq.PositionSide)
 		orderList = append(orderList, (&futures.ModifyOrder{}).
 			Symbol(orderReq.TradingPair.ToString()).
-			Side(futures.SideType(orderReq.Side)).
+			Side(side).
 			Quantity(orderReq.Quantity.String()).
 			Price(orderReq.Price.String()).
 			OrderID(orderReq.Id.ToInt64()))
@@ -196,19 +198,31 @@ func (o *OrderService) GetOrder(ctx context.Context, req exchange.GetOrderReq) (
 	stopPrice, _ := decimal.NewFromString(order.StopPrice)
 	amount, _ := decimal.NewFromString(order.OrigQuantity)
 	executedQty, _ := decimal.NewFromString(order.ExecutedQuantity)
+	orderType, positionSide := o.getOrderType(order)
+
+	if orderType == exchange.OrderTypeClose {
+		price = stopPrice
+	}
 
 	return exchange.OrderInfo{
 		Id:               strconv.FormatInt(order.OrderID, 10),
 		TradingPair:      req.TradingPair,
-		Side:             exchange.OrderSide(order.Side),
+		OrderType:        orderType,
+		PositionSide:     positionSide,
 		Price:            price,
-		StopPrice:        stopPrice,
 		Quantity:         amount,
 		ExecutedQuantity: executedQty,
 		Status:           exchange.OrderStatus(order.Status),
 		CreatedAt:        time.UnixMilli(order.Time),
 		UpdatedAt:        time.UnixMilli(order.UpdateTime),
 	}, nil
+}
+
+func (o *OrderService) getOrderType(order *futures.Order) (exchange.OrderType, exchange.PositionSide) {
+	if order.OrigType == futures.OrderTypeStop || order.OrigType == futures.OrderTypeTakeProfit {
+		return exchange.OrderTypeClose, exchange.PositionSide(order.PositionSide)
+	}
+	return exchange.OrderTypeOpen, exchange.PositionSide(order.PositionSide)
 }
 
 func (o *OrderService) GetOrders(ctx context.Context, req exchange.GetOrdersReq) ([]exchange.OrderInfo, error) {
@@ -237,12 +251,18 @@ func (o *OrderService) GetOrders(ctx context.Context, req exchange.GetOrdersReq)
 		amount, _ := decimal.NewFromString(oinfo.OrigQuantity)
 		executedQty, _ := decimal.NewFromString(oinfo.ExecutedQuantity)
 		base, quote := exchange.SplitSymbol(oinfo.Symbol)
+		orderType, positionSide := o.getOrderType(oinfo)
+
+		if orderType == exchange.OrderTypeClose {
+			price = stopPrice
+		}
+
 		results = append(results, exchange.OrderInfo{
 			Id:               strconv.FormatInt(oinfo.OrderID, 10),
 			TradingPair:      exchange.TradingPair{Base: base, Quote: quote},
-			Side:             exchange.OrderSide(oinfo.Side),
+			OrderType:        orderType,
+			PositionSide:     positionSide,
 			Price:            price,
-			StopPrice:        stopPrice,
 			Quantity:         amount,
 			ExecutedQuantity: executedQty,
 			Status:           o.orderStatus(oinfo.Status),
@@ -254,10 +274,12 @@ func (o *OrderService) GetOrders(ctx context.Context, req exchange.GetOrdersReq)
 }
 
 func (o *OrderService) CancelOrder(ctx context.Context, req exchange.CancelOrderReq) error {
-	_, err := o.cli.NewCancelOrderService().
-		Symbol(req.TradingPair.ToString()).
-		OrderID(req.Id.ToInt64()).
-		Do(ctx)
+	svc := o.cli.NewCancelOrderService()
+	svc = svc.Symbol(req.TradingPair.ToString())
+	if !req.Id.IsZero() {
+		svc = svc.OrderID(req.Id.ToInt64())
+	}
+	_, err := svc.Do(ctx)
 	return err
 }
 

@@ -61,11 +61,12 @@ type CreateOrderReq struct {
 
 // modify req
 type ModifyOrderReq struct {
-	Id          OrderId
-	TradingPair TradingPair
-	Side        OrderSide
-	Price       decimal.Decimal // 限价单时有效
-	Quantity    decimal.Decimal
+	Id           OrderId
+	TradingPair  TradingPair
+	PositionSide PositionSide
+	OrderType    OrderType
+	Price        decimal.Decimal // 限价单时有效
+	Quantity     decimal.Decimal
 }
 
 type GetOrderReq struct {
@@ -88,12 +89,12 @@ type CancelOrderReq struct {
 	TradingPair TradingPair
 }
 
-type OrderSide string
+// type OrderSide string
 
-const (
-	OrderSideBuy  OrderSide = "BUY"
-	OrderSideSell OrderSide = "SELL"
-)
+// const (
+// 	OrderSideBuy  OrderSide = "BUY"
+// 	OrderSideSell OrderSide = "SELL"
+// )
 
 type PositionSide string
 
@@ -103,16 +104,16 @@ const (
 )
 
 // GetCloseOrderSide 根据持仓方向获取平仓订单方向
-func (ps PositionSide) GetCloseOrderSide() OrderSide {
-	switch ps {
-	case PositionSideLong:
-		return OrderSideSell // 多头平仓用卖单
-	case PositionSideShort:
-		return OrderSideBuy // 空头平仓用买单
-	default:
-		return OrderSideSell
-	}
-}
+// func (ps PositionSide) GetCloseOrderSide() OrderSide {
+// 	switch ps {
+// 	case PositionSideLong:
+// 		return OrderSideSell // 多头平仓用卖单
+// 	case PositionSideShort:
+// 		return OrderSideBuy // 空头平仓用买单
+// 	default:
+// 		return OrderSideSell
+// 	}
+// }
 
 type OrderStatus string
 
@@ -139,9 +140,9 @@ const (
 type OrderInfo struct {
 	Id               string
 	TradingPair      TradingPair
-	Side             OrderSide
+	OrderType        OrderType
+	PositionSide     PositionSide
 	Price            decimal.Decimal // 限价单价格
-	StopPrice        decimal.Decimal // 止盈止损触发价格（STOP/TAKE_PROFIT 类型订单使用）
 	Quantity         decimal.Decimal
 	ExecutedQuantity decimal.Decimal // 已成交数量
 	Status           OrderStatus

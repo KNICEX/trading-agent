@@ -153,11 +153,11 @@ func (s *TradingServiceSuite) Test03_OpenPositionWithStopOrders() {
 	for _, order := range orders {
 		if !resp.TakeProfitId.IsZero() && order.Id == resp.TakeProfitId.ToString() {
 			tpFound = true
-			s.T().Logf("  ✓ 找到止盈单: 触发价=%s, 数量=%s", order.StopPrice, order.Quantity)
+			s.T().Logf("  ✓ 找到止盈单: 触发价=%s, 数量=%s", order.Price, order.Quantity)
 		}
 		if !resp.StopLossId.IsZero() && order.Id == resp.StopLossId.ToString() {
 			slFound = true
-			s.T().Logf("  ✓ 找到止损单: 触发价=%s, 数量=%s", order.StopPrice, order.Quantity)
+			s.T().Logf("  ✓ 找到止损单: 触发价=%s, 数量=%s", order.Price, order.Quantity)
 		}
 	}
 
