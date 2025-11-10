@@ -40,6 +40,7 @@ type PositionHistory struct {
 	EntryPrice   decimal.Decimal
 	ClosePrice   decimal.Decimal
 	MaxQuantity  decimal.Decimal
+	RealizedPnl  decimal.Decimal
 	OpenedAt     time.Time
 	ClosedAt     time.Time
 

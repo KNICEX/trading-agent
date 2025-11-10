@@ -38,13 +38,6 @@ func (e *Executor) Execute(ctx context.Context, signal portfolio.EnhancedSignal)
 	if signal.PositionSide == exchange.PositionSideLong {
 		// 信号是做多
 		if shortPosition != nil {
-			// 有空单，先平空
-			fmt.Println("检测到空单，先平空单再开多单")
-			err := e.closePosition(ctx, signal.TradingPair, exchange.PositionSideShort, shortPosition.Quantity.Abs())
-			if err != nil {
-				return fmt.Errorf("failed to close short position: %w", err)
-			}
-
 			// 撤掉所有订单
 			err = e.orderSvc.CancelOrders(ctx, exchange.CancelOrdersReq{
 				TradingPair: signal.TradingPair,
@@ -52,6 +45,14 @@ func (e *Executor) Execute(ctx context.Context, signal portfolio.EnhancedSignal)
 			if err != nil {
 				return fmt.Errorf("failed to cancel short position order: %w", err)
 			}
+
+			// 有空单，先平空
+			fmt.Println("检测到空单，先平空单再开多单")
+			err = e.closePosition(ctx, signal.TradingPair, exchange.PositionSideShort, shortPosition.Quantity.Abs())
+			if err != nil {
+				return fmt.Errorf("failed to close short position: %w", err)
+			}
+
 		}
 
 		// 开多单或加多仓
@@ -65,12 +66,6 @@ func (e *Executor) Execute(ctx context.Context, signal portfolio.EnhancedSignal)
 	} else if signal.PositionSide == exchange.PositionSideShort {
 		// 信号是做空
 		if longPosition != nil {
-			// 有多单，先平多
-			fmt.Println("检测到多单，先平多单再开空单")
-			err := e.closePosition(ctx, signal.TradingPair, exchange.PositionSideLong, longPosition.Quantity.Abs())
-			if err != nil {
-				return fmt.Errorf("failed to close long position: %w", err)
-			}
 
 			err = e.orderSvc.CancelOrders(ctx, exchange.CancelOrdersReq{
 				TradingPair: signal.TradingPair,
@@ -78,6 +73,14 @@ func (e *Executor) Execute(ctx context.Context, signal portfolio.EnhancedSignal)
 			if err != nil {
 				return fmt.Errorf("failed to cancel long position order: %w", err)
 			}
+
+			// 有多单，先平多
+			fmt.Println("检测到多单，先平多单再开空单")
+			err = e.closePosition(ctx, signal.TradingPair, exchange.PositionSideLong, longPosition.Quantity.Abs())
+			if err != nil {
+				return fmt.Errorf("failed to close long position: %w", err)
+			}
+
 		}
 
 		// 开空单或加空仓

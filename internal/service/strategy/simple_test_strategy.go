@@ -34,7 +34,7 @@ func NewSimpleTestStrategy(tradingPair exchange.TradingPair) *SimpleTestStrategy
 		tradingPair: tradingPair,
 		shortPeriod: 5,  // 5周期短期均线
 		longPeriod:  20, // 20周期长期均线
-		interval:    exchange.Interval5m,
+		interval:    exchange.Interval1h,
 		klines:      make([]exchange.Kline, 0, 100),
 		lastSignal:  SignalActionHold,
 	}

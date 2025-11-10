@@ -537,7 +537,7 @@ func TestEdgeCase_AddPositionMultipleTimes(t *testing.T) {
 func TestEdgeCase_PartialCloseMultipleTimes(t *testing.T) {
 	startTime := time.Now()
 	endTime := startTime.Add(24 * time.Hour)
-	initialBalance := 10000.0
+	initialBalance := 60000.0 // 增加余额以支持开仓1.0 BTC
 
 	svc, provider := createTestExchange(t, initialBalance, startTime, endTime)
 

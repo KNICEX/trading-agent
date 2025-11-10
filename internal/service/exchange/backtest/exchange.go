@@ -51,9 +51,6 @@ type ExchangeService struct {
 
 	// 冻结资金（开仓挂单占用）
 	frozenFunds map[exchange.OrderId]decimal.Decimal // 每个开仓挂单冻结的资金
-
-	// 冻结持仓数量（平仓挂单占用）
-	frozenPositions map[exchange.OrderId]decimal.Decimal // 每个平仓挂单冻结的持仓数量
 }
 
 // NewExchangeService 使用自定义K线提供者创建服务
@@ -81,7 +78,6 @@ func NewExchangeService(startTime, endTime time.Time, initialBalance decimal.Dec
 		currentPrices:     make(map[string]decimal.Decimal),
 		currentTimes:      make(map[string]time.Time),
 		frozenFunds:       make(map[exchange.OrderId]decimal.Decimal),
-		frozenPositions:   make(map[exchange.OrderId]decimal.Decimal),
 	}
 
 	return svc
@@ -177,7 +173,7 @@ func (svc *ExchangeService) SubscribeKline(ctx context.Context, tradingPair exch
 				default:
 				}
 
-				time.Sleep(time.Millisecond * 20)
+				time.Sleep(time.Millisecond * 10)
 				// 更新当前价格为K线收盘价（用于市价单成交）
 				svc.updatePrice(tradingPair, kline.Close)
 

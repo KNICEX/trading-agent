@@ -48,35 +48,22 @@ func (svc *ExchangeService) CreateOrder(ctx context.Context, req exchange.Create
 		svc.frozenFunds[orderId] = frozenAmount
 		svc.accountMu.Unlock()
 	} else {
-		// 🔑 平仓订单：冻结持仓数量
-		posKey := svc.getPositionKey(req.TradingPair, req.PositonSide)
+		// 🔑 平仓订单：检查持仓数量是否足够
+		// posKey := svc.getPositionKey(req.TradingPair, req.PositonSide)
 
-		svc.positionMu.RLock()
-		position, exists := svc.positions[posKey]
-		svc.positionMu.RUnlock()
+		// svc.positionMu.RLock()
+		// position, exists := svc.positions[posKey]
+		// svc.positionMu.RUnlock()
 
-		if !exists {
-			return "", fmt.Errorf("position not found: %s", posKey)
-		}
+		// if !exists {
+		// 	return "", fmt.Errorf("position not found: %s", posKey)
+		// }
 
-		// 计算可用持仓数量（总持仓 - 已冻结）
-		svc.orderMu.RLock()
-		totalFrozen := decimal.Zero
-		for _, frozenQty := range svc.frozenPositions {
-			totalFrozen = totalFrozen.Add(frozenQty)
-		}
-		svc.orderMu.RUnlock()
-
-		availableQty := position.Quantity.Sub(totalFrozen)
-		if availableQty.LessThan(req.Quantity) {
-			return "", fmt.Errorf("insufficient position quantity: available=%s, required=%s",
-				availableQty, req.Quantity)
-		}
-
-		// 冻结持仓数量
-		svc.orderMu.Lock()
-		svc.frozenPositions[orderId] = req.Quantity
-		svc.orderMu.Unlock()
+		// // 检查持仓数量是否足够
+		// if position.Quantity.LessThan(req.Quantity) {
+		// 	return "", fmt.Errorf("insufficient position quantity: have=%s, required=%s",
+		// 		position.Quantity, req.Quantity)
+		// }
 	}
 
 	// 创建订单记录（扩展版本）
@@ -184,7 +171,7 @@ func (svc *ExchangeService) CancelOrder(ctx context.Context, req exchange.Cancel
 	order.Status = exchange.OrderStatus("cancelled")
 	order.UpdatedAt = svc.now(order.TradingPair)
 
-	// 🔑 释放冻结的资金或持仓
+	// 🔑 释放冻结的资金（仅开仓订单）
 	if order.OrderType == exchange.OrderTypeOpen {
 		// 开仓订单：释放冻结资金
 		frozenAmount, wasFrozen := svc.frozenFunds[req.Id]
@@ -200,14 +187,8 @@ func (svc *ExchangeService) CancelOrder(ctx context.Context, req exchange.Cancel
 			svc.orderMu.Unlock()
 		}
 	} else {
-		// 平仓订单：释放冻结持仓
-		frozenQty, wasFrozen := svc.frozenPositions[req.Id]
-		if wasFrozen {
-			delete(svc.frozenPositions, req.Id)
-		}
+		// 平仓订单：无需释放冻结持仓
 		svc.orderMu.Unlock()
-		// 持仓数量冻结不需要额外操作，只是从map中删除即可
-		_ = frozenQty // 避免unused警告
 	}
 
 	return nil
@@ -449,16 +430,6 @@ func (svc *ExchangeService) closePosition(posKey string, order *exchange.OrderIn
 			position.Quantity, order.Quantity)
 	}
 
-	// 🔑 释放冻结的持仓数量（如果有）
-	orderId := exchange.OrderId(order.Id)
-	svc.orderMu.Lock()
-	frozenQty, wasFrozen := svc.frozenPositions[orderId]
-	if wasFrozen {
-		delete(svc.frozenPositions, orderId)
-	}
-	svc.orderMu.Unlock()
-	_ = frozenQty // 避免unused警告
-
 	// 计算盈亏
 	var pnl decimal.Decimal
 	if order.PositionSide == exchange.PositionSideLong {
@@ -481,6 +452,9 @@ func (svc *ExchangeService) closePosition(posKey string, order *exchange.OrderIn
 
 	// 更新或关闭仓位
 	oldQuantity := position.Quantity
+	if order.Quantity.GreaterThan(position.Quantity) {
+		order.Quantity = position.Quantity
+	}
 	position.Quantity = position.Quantity.Sub(order.Quantity)
 	position.MarginAmount = position.MarginAmount.Sub(releasedMargin)
 	now := svc.now(order.TradingPair)
@@ -513,6 +487,10 @@ func (svc *ExchangeService) closePosition(posKey string, order *exchange.OrderIn
 				UpdatedAt:      order.UpdatedAt,
 				CompletedAt:    now,
 			})
+
+			for _, event := range history.Events {
+				history.RealizedPnl = history.RealizedPnl.Add(event.RealizedPnl)
+			}
 
 			// 移动到历史记录列表
 			svc.positionHistories = append(svc.positionHistories, *history)

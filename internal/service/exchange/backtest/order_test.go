@@ -101,7 +101,7 @@ func TestOrderService_CreateLimitOrder(t *testing.T) {
 func TestOrderService_GetOrders(t *testing.T) {
 	startTime := time.Now()
 	endTime := startTime.Add(24 * time.Hour)
-	initialBalance := 10000.0
+	initialBalance := 20000.0 // 增加初始余额以支持多个订单
 
 	svc, provider := createTestExchange(t, initialBalance, startTime, endTime)
 
@@ -211,7 +211,7 @@ func TestOrderService_CancelOrder(t *testing.T) {
 func TestOrderService_CancelOrders(t *testing.T) {
 	startTime := time.Now()
 	endTime := startTime.Add(24 * time.Hour)
-	initialBalance := 10000.0
+	initialBalance := 20000.0 // 增加初始余额以支持多个订单
 
 	svc, provider := createTestExchange(t, initialBalance, startTime, endTime)
 
@@ -450,8 +450,10 @@ func TestOrderService_FrozenFunds(t *testing.T) {
 	_ = orderId
 }
 
-// TestOrderService_FrozenPosition 测试冻结持仓机制
-func TestOrderService_FrozenPosition(t *testing.T) {
+// TestOrderService_MultiplePendingCloseOrders 测试多个平仓挂单
+// 币安交易所允许创建多个平仓挂单，即使总数量超过持仓
+// 只要单个订单的数量不超过当前持仓数量即可
+func TestOrderService_MultiplePendingCloseOrders(t *testing.T) {
 	startTime := time.Now()
 	endTime := startTime.Add(24 * time.Hour)
 	initialBalance := 15000.0 // 增加初始余额以应对市价单价格波动
@@ -479,8 +481,8 @@ func TestOrderService_FrozenPosition(t *testing.T) {
 	})
 	<-klineChan
 
-	// 创建平仓限价单（不会立即成交）
-	closeOrderId, err := svc.CreateOrder(ctx, exchange.CreateOrderReq{
+	// 创建第一个平仓限价单（不会立即成交）
+	closeOrderId1, err := svc.CreateOrder(ctx, exchange.CreateOrderReq{
 		TradingPair: pair,
 		OrderType:   exchange.OrderTypeClose,
 		PositonSide: exchange.PositionSideLong,
@@ -490,35 +492,41 @@ func TestOrderService_FrozenPosition(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// 尝试创建另一个平仓订单（数量过大，超过可用持仓）
+	// 创建第二个平仓订单（允许创建，因为单个订单数量不超过持仓）
+	closeOrderId2, err := svc.CreateOrder(ctx, exchange.CreateOrderReq{
+		TradingPair: pair,
+		OrderType:   exchange.OrderTypeClose,
+		PositonSide: exchange.PositionSideLong,
+		Price:       decimal.NewFromFloat(61000),
+		Quantity:    decimal.NewFromFloat(0.15),
+		Timestamp:   time.Now(),
+	})
+	require.NoError(t, err, "应该可以创建第二个平仓订单")
+
+	// 尝试创建数量超过持仓的订单（应该失败）
 	_, err = svc.CreateOrder(ctx, exchange.CreateOrderReq{
 		TradingPair: pair,
 		OrderType:   exchange.OrderTypeClose,
 		PositonSide: exchange.PositionSideLong,
-		Price:       decimal.NewFromFloat(60000),
-		Quantity:    decimal.NewFromFloat(0.15), // 0.1已冻结，只剩0.1可用
+		Price:       decimal.NewFromFloat(62000),
+		Quantity:    decimal.NewFromFloat(0.3), // 超过持仓数量0.2
 		Timestamp:   time.Now(),
 	})
 	assert.Error(t, err, "应该因为持仓数量不足而失败")
 	assert.Contains(t, err.Error(), "insufficient position quantity")
 
-	// 取消第一个平仓订单，释放冻结的持仓
+	// 取消两个订单
 	err = svc.CancelOrder(ctx, exchange.CancelOrderReq{
-		Id:          closeOrderId,
+		Id:          closeOrderId1,
 		TradingPair: pair,
 	})
 	require.NoError(t, err)
 
-	// 现在应该可以创建新的平仓订单
-	_, err = svc.CreateOrder(ctx, exchange.CreateOrderReq{
+	err = svc.CancelOrder(ctx, exchange.CancelOrderReq{
+		Id:          closeOrderId2,
 		TradingPair: pair,
-		OrderType:   exchange.OrderTypeClose,
-		PositonSide: exchange.PositionSideLong,
-		Price:       decimal.NewFromFloat(60000),
-		Quantity:    decimal.NewFromFloat(0.15),
-		Timestamp:   time.Now(),
 	})
-	require.NoError(t, err, "取消订单后应该可以创建新订单")
+	require.NoError(t, err)
 }
 
 // TestOrderService_PartialFill 测试部分成交机制

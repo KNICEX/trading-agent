@@ -26,7 +26,7 @@ func TestBacktestEngine_WithBinanceData(t *testing.T) {
 	// 1. 准备测试数据 - 回测2024年1月1日到1月3日的BTC数据
 	tradingPair := exchange.TradingPair{Base: "BTC", Quote: "USDT"}
 	startTime := time.Date(2025, 6, 6, 0, 0, 0, 0, time.UTC)
-	endTime := time.Date(2025, 6, 18, 0, 0, 0, 0, time.UTC)
+	endTime := time.Date(2025, 6, 20, 0, 0, 0, 0, time.UTC)
 	initialBalance := decimal.NewFromInt(10000) // 初始资金 10000 USDT
 
 	t.Logf("回测时间段: %s 至 %s", startTime.Format("2006-01-02"), endTime.Format("2006-01-02"))
@@ -124,19 +124,21 @@ func TestBacktestEngine_WithBinanceData(t *testing.T) {
 	}
 
 	// 获取持仓历史记录
-	// positionHistories, err := exchangeSvc.PositionService().GetHistoryPositions(ctx, exchange.GetHistoryPositionsReq{})
-	// require.NoError(t, err, "获取持仓历史失败")
+	positionHistories, err := exchangeSvc.PositionService().GetHistoryPositions(ctx, exchange.GetHistoryPositionsReq{})
+	require.NoError(t, err, "获取持仓历史失败")
 
-	// t.Logf("持仓历史记录数: %d", len(positionHistories))
-	// for i, history := range positionHistories {
-	// 	t.Logf("持仓 #%d:", i+1)
-	// 	t.Logf("  交易对: %s", history.TradingPair.ToString())
-	// 	t.Logf("  方向: %s", history.PositionSide)
-	// 	t.Logf("  开仓时间: %s", history.OpenedAt.Format("2006-01-02 15:04:05"))
-	// 	t.Logf("  平仓时间: %s", history.ClosedAt.Format("2006-01-02 15:04:05"))
-	// 	t.Logf("  入场价: %s", history.EntryPrice.String())
-	// 	t.Logf("  出场价: %s", history.ClosePrice.String())
-	// 	t.Logf("  最大数量: %s", history.MaxQuantity.String())
+	t.Logf("持仓历史记录数: %d", len(positionHistories))
+	for i, history := range positionHistories {
+		t.Logf("持仓 #%d:", i+1)
+		t.Logf("  交易对: %s", history.TradingPair.ToString())
+		t.Logf("  方向: %s", history.PositionSide)
+		t.Logf("  开仓时间: %s", history.OpenedAt.Format("2006-01-02 15:04:05"))
+		t.Logf("  平仓时间: %s", history.ClosedAt.Format("2006-01-02 15:04:05"))
+		t.Logf("  入场价: %s", history.EntryPrice.String())
+		t.Logf("  出场价: %s", history.ClosePrice.String())
+		t.Logf("  最大数量: %s", history.MaxQuantity.String())
+		t.Logf("  已实现盈亏: %s", history.RealizedPnl.String())
+	}
 
 	// 	// 计算总的已实现盈亏
 	// 	totalPnl := decimal.Zero
